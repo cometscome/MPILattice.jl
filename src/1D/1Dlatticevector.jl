@@ -27,7 +27,7 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
         @assert PE == Nprocs "num. of MPI process should be PE. Now Nprocs = $Nprocs and PE = $PE"
         myrank = MPI.Comm_rank(comm)
 
-        data = zeros(elementtype, NC, PN[1])
+        data = zeros(elementtype, NC, PN[1]+2Nwing)
 
         wings_back = zeros(elementtype, NC, Nwing)
         #wings_back_window = MPI.Win_create(wings_back, comm)
@@ -71,7 +71,8 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
         for i = 1:M.PN[1]
             ix = get_ix(i, M.myrank, M.PN[1])
             for ic = 1:NC
-                M.data[ic, i] = A[ic, ix]
+                #println(A[ic, ix],(ic, i+Nwing))
+                M.data[ic, i+Nwing] = A[ic, ix]
             end
         end
 
@@ -81,11 +82,42 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
     end
 end
 
+function jaccMPI_kernel_mul!(i, C::AbstractMatrix, A, B, NC,Nwing)
+    for ic=1:NC
+        C[ic,i+Nwing] = A[ic,i+Nwing]*B[ic,i+Nwing]
+    end
+end
+
+function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    B::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
+    {T_array,NC,NX,PE,Nwing,Nprocs}
+    JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul!,C.data,A.data,B.data,NC,Nwing)
+    set_wing!(C) 
+end
+
+function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    B::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift}) where 
+    {T_array,NC,NX,PE,Nwing,Nprocs,shift}
+    JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul!,C.data,A.data,B.data,NC,Nwing)
+    set_wing!(C) 
+end
+
+
 function get_datatype(::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
     return T_array
 end
 
 function Base.getindex(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}, ic,i::Int) where {T_array,NC,NX,PE,Nwing,Nprocs}
+    iout = get_localindex(i,A.myrank,A.PN[1],Nwing)
+    isinside =(iout in 1:(A.PN[1]+2Nwing))
+    if isinside
+        return A.data[ic,iout]
+    else
+        a = similar(A.data[1:NC,1])
+        a .= NaN
+        return  a
+    end
+    #=
     iout,isinside,isback,isforward = get_localindex(i,A.myrank,A.PN[1],Nwing)
     #println((i,iout,isinside))
     if isinside
@@ -101,6 +133,7 @@ function Base.getindex(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}, ic,i:
     end
     
     return v
+    =#
 end
 
 
@@ -114,7 +147,7 @@ function Base.display(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
             for i = 1:A.PN[1]
                 ix = get_ix(i, A.myrank, A.PN[1])
                 for ic = 1:NC
-                    println("$ic \t $ix \t $(A.data[ic,i])")
+                    println("$ic \t $ix \t $(A.data[ic,i+Nwing])")
                 end
             end
         end
@@ -146,11 +179,18 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
     #display(wings_back_window)
     #println(view(A.data, 1:NC, (A.PN[1]-Nwing+1):A.PN[1]))
     #println("myrank_sendto $myrank_sendto $(A.myrank)")
-    MPI.Put(A.data[ 1:NC, (A.PN[1]-Nwing+1):A.PN[1]], myrank_sendto, wings_back_window)
+    istart = Nwing + A.PN[1] - Nwing + 1
+    iend = Nwing +A.PN[1]
+    MPI.Put(A.data[ 1:NC, istart:iend], myrank_sendto, wings_back_window)
     MPI.Win_fence(0, wings_back_window)
     MPI.free(wings_back_window)
 
     #println("myrank = $(A.myrank) $(A.wings_back)")
+    for i=1:Nwing
+        for ic=1:NC
+            A.data[ic,i] = A.wings_back[ic,i]
+        end
+    end
     MPI.Barrier(A.comm)
     
     #forward wing
@@ -161,9 +201,11 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
     end
 
     wings_forward_window = MPI.Win_create(A.wings_forward, A.comm)
+    istart = Nwing + 1
+    iend = Nwing + Nwing
 
     MPI.Win_fence(0,  wings_forward_window)
-    MPI.Put(A.data[ 1:NC, 1:Nwing], myrank_sendto,  wings_forward_window)
+    MPI.Put(A.data[ 1:NC, istart:iend], myrank_sendto,  wings_forward_window)
     MPI.Win_fence(0,  wings_forward_window)
 
     MPI.free(wings_forward_window)
@@ -171,6 +213,11 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
   # display(A.wings_forward_window)
     #println(A.wings_back[:,:])
     #println(A.wings_forward[:,:])
+    for i=1:Nwing
+        for ic=1:NC
+            A.data[ic,Nwing+A.PN[1]+i] = A.wings_forward[ic,i]
+        end
+    end
 
     MPI.Barrier(A.comm)
 

@@ -1,6 +1,9 @@
 using MPILattice
 using Test
 using MPI
+import JACC
+using LinearAlgebra
+JACC.@init_backend
 
 function test()
     MPI.Init()
@@ -10,19 +13,24 @@ function test()
     Nprocs = MPI.Comm_size(comm)
 
     PE = Nprocs
+    Nwing = 1
 
-    M1 = MLattice1Dvector(NC, NX, PE;Nwing=2)
+    M1 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing)
 
     display(M1)
 
     A = zeros(1, NX)
     A[:] = collect(1:NX)
     println(A)
-    Nwing = 3
+    B = zeros(1, NX)
+    B[:] = 10 .* collect(1:NX)
 
-    M2 = MLattice1Dvector(A, PE,Nwing=Nwing)
+
     
 
+    M2 = MLattice1Dvector(A, PE,Nwing=Nwing)
+    M3 = MLattice1Dvector(B, PE,Nwing=Nwing)
+    
     display(M2)
 
     if M2.myrank == 0
@@ -36,6 +44,28 @@ function test()
     if M2.myrank == 1
         for ix=1-Nwing:NX+Nwing
             println("$ix $(M2[1:NC,ix])")
+        end
+    end
+
+    MPI.Barrier(comm)
+
+    mul!(M1,M2,M3)
+
+    display(M2)
+    display(M3)
+    display(M1)
+
+    if M2.myrank == 0
+        for ix=1-Nwing:NX+Nwing
+            println("$ix $(M1[1:NC,ix])")
+        end
+    end
+
+    MPI.Barrier(comm)
+
+    if M2.myrank == 1
+        for ix=1-Nwing:NX+Nwing
+            println("$ix $(M1[1:NC,ix])")
         end
     end
 
@@ -92,6 +122,6 @@ end
 
 @testset "MPILattice.jl" begin
     # Write your tests here.
-    #test()
-    test2()
+    test()
+    #test2()
 end
