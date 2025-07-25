@@ -83,7 +83,9 @@ function test2()
 
     PE = Nprocs
 
-    M1 = MLattice1Dmatrix(NC, NC,NX, PE;Nwing=2)
+    Nwing = 1
+
+    M1 = MLattice1Dmatrix(NC, NC,NX, PE;Nwing)
 
     display(M1)
 
@@ -92,9 +94,16 @@ function test2()
         A[:,:,i] .= i
     end
     println(A)
-    Nwing = 3
+
+    B = zeros(NC,NC, NX)
+    for i=1:NX
+        B[:,:,i] .= 10*i
+    end
+    println(B)
+
 
     M2 = MLattice1Dmatrix(A, PE,Nwing=Nwing)
+    M3 = MLattice1Dmatrix(B, PE,Nwing=Nwing)
     
 
     display(M2)
@@ -117,11 +126,33 @@ function test2()
 
     MPI.Barrier(comm)
 
+    mul!(M1,M2,M3)
+
+    display(M2)
+    display(M3)
+    display(M1)
+
+    if M2.myrank == 0
+        for ix=1-Nwing:NX+Nwing
+            println(ix)
+            display(M1[1:NC,1:NC,ix])
+        end
+    end
+
+    MPI.Barrier(comm)
+
+    if M2.myrank == 1
+        for ix=1-Nwing:NX+Nwing
+            println(ix)
+            display(M1[1:NC,1:NC,ix])
+        end
+    end
+
     return true
 end
 
 @testset "MPILattice.jl" begin
     # Write your tests here.
     test()
-    #test2()
+    test2()
 end

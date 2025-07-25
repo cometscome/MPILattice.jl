@@ -8,7 +8,7 @@ struct MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs} <: MLattice1D{T_arra
     #wings_forward_window::MPI.Win
     comm::MPI.Comm
 
-    function MLattice1Dmatrix(NC1::Integer, NC2::Integer,NX::Integer, PE::Integer;
+    function MLattice1Dmatrix(NC1::Integer,NC2::Integer, NX::Integer, PE::Integer;
         elementtype=Float64,
         mpiinit=true,
         Nwing=1,
@@ -27,7 +27,7 @@ struct MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs} <: MLattice1D{T_arra
         @assert PE == Nprocs "num. of MPI process should be PE. Now Nprocs = $Nprocs and PE = $PE"
         myrank = MPI.Comm_rank(comm)
 
-        data = zeros(elementtype, NC1,NC2, PN[1])
+        data = zeros(elementtype, NC1,NC2, PN[1]+2Nwing)
 
         wings_back = zeros(elementtype, NC1,NC2, Nwing)
         #wings_back_window = MPI.Win_create(wings_back, comm)
@@ -52,13 +52,13 @@ struct MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs} <: MLattice1D{T_arra
         Nwing=1,
         comm=MPI.COMM_WORLD) where T
 
-        NC1, NC2,NX = size(A)
+        NC1, NC2, NX = size(A)
         elementtype = eltype(A)
 
         #GC.gc()
        
 
-        M = MLattice1Dmatrix(NC1,NC2, NX, PE;
+        M = MLattice1Dmatrix(NC1, NC2, NX, PE;
             elementtype,
             mpiinit,
             Nwing,
@@ -72,7 +72,8 @@ struct MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs} <: MLattice1D{T_arra
             ix = get_ix(i, M.myrank, M.PN[1])
             for jc = 1:NC2
                 for ic = 1:NC1
-                    M.data[ic,jc, i] = A[ic, jc,ix]
+                    #println(A[ic, jc,ix],(ic, i+Nwing))
+                    M.data[ic, jc,i+Nwing] = A[ic, jc,ix]
                 end
             end
         end
@@ -83,26 +84,42 @@ struct MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs} <: MLattice1D{T_arra
     end
 end
 
+function jaccMPI_kernel_mul!(i, C::AbstractArray{T, 3}, A, B, NC,Nwing) where {T}
+    for jc = 1:NC
+        for ic=1:NC
+            C[ic,jc,i+Nwing] = 0
+            for kc=1:NC
+                C[ic,jc,i+Nwing] += A[ic,kc,i+Nwing]*B[kc,jc,i+Nwing]
+            end
+        end
+    end
+end
+
+function LinearAlgebra.mul!(C::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs},A::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs},
+    B::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs}) where 
+    {T_array,NC1,NC2,NX,PE,Nwing,Nprocs}
+    @assert NC1 == NC2 "matrix should be square"
+    JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul!,C.data,A.data,B.data,NC1,Nwing)
+    set_wing!(C) 
+end
+
+
+
 function get_datatype(::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs}) where {T_array,NC1,NC2,NX,PE,Nwing,Nprocs}
     return T_array
 end
 
 function Base.getindex(A::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs}, ic,jc,i::Int) where {T_array,NC1,NC2,NX,PE,Nwing,Nprocs}
-    iout,isinside,isback,isforward = get_localindex(i,A.myrank,A.PN[1],Nwing)
-    #println((i,iout,isinside))
+    iout = get_localindex(i,A.myrank,A.PN[1],Nwing)
+    isinside =(iout in 1:(A.PN[1]+2Nwing))
     if isinside
-        if isback
-            v = A.wings_back[ic,jc,iout]
-        elseif isforward
-            v = A.wings_forward[ic,jc,iout]
-        else
-            v = A.data[ic,jc,iout]
-        end
+        return A.data[ic,jc,iout]
     else
-        v = NaN
+        a = similar(A.data[1:NC1,1:NC2,1])
+        a .= NaN
+        return  a
     end
-    
-    return v
+
 end
 
 
@@ -117,9 +134,9 @@ function Base.display(A::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs}) w
                 ix = get_ix(i, A.myrank, A.PN[1])
                 for jc = 1:NC2
                     for ic = 1:NC1
-                        println("$ic \t $jc \t $ix \t $(A.data[ic,jc,i])")
+                        println("$ic \t $ix \t $(A.data[ic,jc,i+Nwing])")
                     end
-                end
+               end
             end
         end
         MPI.Barrier(A.comm)
@@ -150,11 +167,20 @@ function set_wing!(A::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs}) wher
     #display(wings_back_window)
     #println(view(A.data, 1:NC, (A.PN[1]-Nwing+1):A.PN[1]))
     #println("myrank_sendto $myrank_sendto $(A.myrank)")
-    MPI.Put(A.data[ 1:NC1, 1:NC2,(A.PN[1]-Nwing+1):A.PN[1]], myrank_sendto, wings_back_window)
+    istart = Nwing + A.PN[1] - Nwing + 1
+    iend = Nwing +A.PN[1]
+    MPI.Put(A.data[ 1:NC1,1:NC2, istart:iend], myrank_sendto, wings_back_window)
     MPI.Win_fence(0, wings_back_window)
     MPI.free(wings_back_window)
 
     #println("myrank = $(A.myrank) $(A.wings_back)")
+    for i=1:Nwing
+        for jc=1:NC2
+            for ic=1:NC1
+                A.data[ic,jc,i] = A.wings_back[ic,jc,i]
+            end
+        end
+    end
     MPI.Barrier(A.comm)
     
     #forward wing
@@ -165,9 +191,11 @@ function set_wing!(A::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs}) wher
     end
 
     wings_forward_window = MPI.Win_create(A.wings_forward, A.comm)
+    istart = Nwing + 1
+    iend = Nwing + Nwing
 
     MPI.Win_fence(0,  wings_forward_window)
-    MPI.Put(A.data[ 1:NC1,1:NC2, 1:Nwing], myrank_sendto,  wings_forward_window)
+    MPI.Put(A.data[1:NC1,1:NC2, istart:iend], myrank_sendto,  wings_forward_window)
     MPI.Win_fence(0,  wings_forward_window)
 
     MPI.free(wings_forward_window)
@@ -175,6 +203,13 @@ function set_wing!(A::MLattice1Dmatrix{T_array,NC1,NC2,NX,PE,Nwing,Nprocs}) wher
   # display(A.wings_forward_window)
     #println(A.wings_back[:,:])
     #println(A.wings_forward[:,:])
+    for i=1:Nwing
+        for jc=1:NC2
+            for ic=1:NC1
+                A.data[ic,jc,Nwing+A.PN[1]+i] = A.wings_forward[ic,jc,i]
+            end
+        end
+    end
 
     MPI.Barrier(A.comm)
 

@@ -29,7 +29,7 @@ end
 export shift_lattice
 
 include("1D/1Dlatticevector.jl")
-#include("1D/1Dlatticematrix.jl")
+include("1D/1Dlatticematrix.jl")
 
 function get_ix(i, myrank, PN)
     ix = i + PN * myrank
