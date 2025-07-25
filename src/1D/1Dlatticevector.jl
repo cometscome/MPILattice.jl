@@ -98,7 +98,11 @@ end
 function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
     B::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs,shift}
-    JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedB!,C.data,A.data,B.data.data,NC,Nwing,shift)
+    if -Nwing <= shift && shift <= Nwing 
+        JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedB!,C.data,A.data,B.data.data,NC,Nwing,shift)
+    else
+        JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedcopiedB!,C.data,A.data,B.data.datashifted,NC,Nwing,shift)
+    end
     set_wing!(C) 
 end
 
@@ -106,7 +110,31 @@ function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
     A::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift},
     B::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs,shift}
-    JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedA!,C.data,A.data.data,B.data,NC,Nwing,shift)
+    if -Nwing <= shift && shift <= Nwing 
+        JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedA!,C.data,A.data.data,B.data,NC,Nwing,shift)
+    else
+        JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedcopiedA!,C.data,A.data.datashifted,B.data,NC,Nwing,shift)
+    end
+    set_wing!(C) 
+end
+
+function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    A::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift1},
+    B::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift2}) where 
+    {T_array,NC,NX,PE,Nwing,Nprocs,shift1,shift2}
+    if -Nwing <= shift1 && shift1 <= Nwing 
+        if -Nwing <= shift2 && shift2 <= Nwing 
+            JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedAshiftedB!,C.data,A.data.data,B.data.data,NC,Nwing,shift1,shift2)
+        else
+            JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedAshiftedcopiedB!,C.data,A.data.data,B.data.datashifted,NC,Nwing,shift1)
+        end
+    else
+        if -Nwing <= shift2 && shift2 <= Nwing 
+            JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedcopiedAshiftedB!,C.data,A.data.datashifted,B.data.data,NC,Nwing,shift2)
+        else
+            JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedcopiedAshiftedcopiedB!,C.data,A.data.datashifted,B.data.datashifted,NC,Nwing)
+        end
+    end
     set_wing!(C) 
 end
 
@@ -119,9 +147,10 @@ end
 function substitute!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
     A::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs,shift}
-    if abs(shift) <= Nwing 
+    if -Nwing <= shift && shift <= Nwing 
         JACC.parallel_for(C.PN[1],jaccMPI_kernel_substitute_shiftedA!,C.data,A.data.data,NC,Nwing,shift)
     else
+        JACC.parallel_for(C.PN[1],jaccMPI_kernel_substitute_shiftedcopiedA!,C.data,A.data.datashifted,NC,Nwing,shift)
     end
     set_wing!(C) 
 end
@@ -149,7 +178,7 @@ function make_shifteddata!(data::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}
     MPI.Win_fence(0, win)
    
     for ix=1:data.PN[1]
-        ixp = ix + shift
+        ixp = ix - shift
         ip = ixp + data.PN[1] * data.myrank
         while ip > NX
             ip -= NX
@@ -181,23 +210,7 @@ function Base.getindex(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}, ic,i:
         a .= NaN
         return  a
     end
-    #=
-    iout,isinside,isback,isforward = get_localindex(i,A.myrank,A.PN[1],Nwing)
-    #println((i,iout,isinside))
-    if isinside
-        if isback
-            v = A.wings_back[ic,iout]
-        elseif isforward
-            v = A.wings_forward[ic,iout]
-        else
-            v = A.data[ic,iout]
-        end
-    else
-        v = NaN
-    end
-    
-    return v
-    =#
+
 end
 
 

@@ -3,6 +3,7 @@ using Test
 using MPI
 import JACC
 using LinearAlgebra
+using InteractiveUtils
 JACC.@init_backend
 
 function test()
@@ -86,7 +87,10 @@ function test()
 
 
     M6 = shift_lattice(M1,4)
+    mul!(M1,M2,M6)
+    display(M1)
 
+    @code_warntype mul!(M1,M2,M6)
 
     return true
 end
