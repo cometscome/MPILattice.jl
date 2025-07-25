@@ -5,6 +5,8 @@ using JACC
 
 export MLattice1Dvector
 export MLattice1Dmatrix
+export substitute!
+export shift_lattice
 
 # Write your package code here.
 abstract type MLattice{T_array,Dim} end
@@ -21,12 +23,8 @@ struct Shifted_1DLattice{T,T_array,shift} <: MLattice{T_array,1}
 end
 
 
-function shift_lattice(data::MLattice1D,shift)
-    T_array = get_datatype(data)
-    return Shifted_1DLattice{typeof(data),T_array,shift}(data)
-end
 
-export shift_lattice
+
 
 include("1D/1Dlatticevector.jl")
 include("1D/1Dlatticematrix.jl")

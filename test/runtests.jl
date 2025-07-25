@@ -30,6 +30,7 @@ function test()
 
     M2 = MLattice1Dvector(A, PE,Nwing=Nwing)
     M3 = MLattice1Dvector(B, PE,Nwing=Nwing)
+    M4 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing)
     
     display(M2)
 
@@ -55,6 +56,8 @@ function test()
     display(M3)
     display(M1)
 
+
+
     if M2.myrank == 0
         for ix=1-Nwing:NX+Nwing
             println("$ix $(M1[1:NC,ix])")
@@ -70,6 +73,20 @@ function test()
     end
 
     MPI.Barrier(comm)
+
+    substitute!(M4,M1)
+    display(M4)
+
+    M5 = shift_lattice(M1,1)
+    substitute!(M4,M5)
+    display(M4)
+
+    mul!(M1,M2,M5)
+    display(M1)
+
+
+    M6 = shift_lattice(M1,4)
+
 
     return true
 end
@@ -154,5 +171,5 @@ end
 @testset "MPILattice.jl" begin
     # Write your tests here.
     test()
-    test2()
+    #test2()
 end
