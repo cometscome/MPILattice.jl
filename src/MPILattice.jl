@@ -2,6 +2,7 @@ module MPILattice
 using MPI
 
 export MLattice1Dvector
+export MLattice1Dmatrix
 
 # Write your package code here.
 abstract type MLattice{T_array,Dim} end
@@ -20,7 +21,8 @@ end
 
 export shift_lattice
 
-include("1D/1Dlattice.jl")
+include("1D/1Dlatticevector.jl")
+include("1D/1Dlatticematrix.jl")
 
 function get_ix(i, myrank, PN)
     ix = i + PN * myrank
