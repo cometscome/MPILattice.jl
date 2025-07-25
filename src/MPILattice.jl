@@ -22,4 +22,37 @@ export shift_lattice
 
 include("1D/1Dlattice.jl")
 
+function get_ix(i, myrank, PN)
+    ix = i + PN * myrank
+    return ix
+end
+
+function check_index(i,NLX,Nwing)
+    #println(i)
+    isinside = (i in (1-Nwing):(NLX+Nwing))
+    isback = (i in 1-Nwing:0)
+    
+    isforward = (i in NLX+1:NLX+Nwing)
+    if isinside
+        if isback
+            iout = i + Nwing
+        elseif isforward
+            iout = i - NLX
+        else
+            iout = i
+        end
+    else
+        iout = 0
+    end
+
+    #println((iout,isinside,isback,isforward))
+    return iout,isinside,isback,isforward
+end
+
+function get_localindex(ix,myrank,PN,Nwing)
+    i = ix - PN * myrank
+    iout,isinside,isback,isforward = check_index(i,PN,Nwing)
+    return iout,isinside,isback,isforward
+end
+
 end

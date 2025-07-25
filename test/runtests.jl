@@ -23,6 +23,22 @@ function test()
 
     display(M2)
 
+    if M2.myrank == 0
+        for ix=0:NX+1
+            println("$ix $(M2[1:NC,ix])")
+        end
+    end
+
+    MPI.Barrier(comm)
+
+    if M2.myrank == 1
+        for ix=0:NX+1
+            println("$ix $(M2[1:NC,ix])")
+        end
+    end
+
+    MPI.Barrier(comm)
+
     return true
 end
 
