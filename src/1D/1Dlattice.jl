@@ -81,6 +81,10 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
     end
 end
 
+function get_datatype(::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
+    return T_array
+end
+
 function get_ix(i, myrank, PN)
     ix = i + PN * myrank
     return ix
@@ -136,13 +140,12 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
     MPI.Put(view(A.data, 1:NC, 1:Nwing), myrank_sendto,  A.wings_forward_window)
     MPI.Win_fence(0,  A.wings_forward_window)
 
-
-
     MPI.Barrier(A.comm)
 
     #right wing
 end
 
-struct Shifted_1DLattice{T,shift}
-    data::T
-end
+
+
+
+
