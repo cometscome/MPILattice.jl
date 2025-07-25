@@ -14,10 +14,11 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
         Nwing=1,
         comm=MPI.COMM_WORLD)
 
+        GC.gc()
+
         if mpiinit == false
             MPI.Init()
         end
-        println("Mgenerate")
         #MPI.Barrier(comm)
 
         @assert NX % PE == 0 "NX % PE should be 0. Now NX = $NX and PE = $PE"
@@ -26,10 +27,8 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
         @assert PE == Nprocs "num. of MPI process should be PE. Now Nprocs = $Nprocs and PE = $PE"
         myrank = MPI.Comm_rank(comm)
 
-         println("myrank = $(myrank)")
         data = zeros(elementtype, NC, PN[1])
-        println("Mgenerate ??")
-        MPI.Barrier(comm)
+
         wings_back = zeros(elementtype, NC, Nwing)
         wings_back_window = MPI.Win_create(wings_back, comm)
 
@@ -38,8 +37,7 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
 
         T_array = typeof(data)
 
-        println("Mgenerate end")
-        MPI.Barrier(comm)
+
 
         return new{T_array,NC,NX,PE,Nwing,Nprocs}(data, PN, myrank,
             wings_back,
@@ -57,7 +55,7 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
         NC, NX = size(A)
         elementtype = eltype(A)
 
-        println("M $NC,$NX")
+        #GC.gc()
        
 
         M = MLattice1Dvector(NC, NX, PE;
@@ -67,7 +65,8 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
             comm)
 
 
-        println("Mend")
+        #GC.gc()
+        MPI.Barrier(comm)
 
         for i = 1:M.PN[1]
             ix = get_ix(i, M.myrank, M.PN[1])
@@ -104,10 +103,6 @@ function Base.display(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
         MPI.Barrier(A.comm)
     end
 
-    if A.myrank == 0
-        println("display end")
-    end
-    println("myrank = $(A.myrank)")
     MPI.Barrier(A.comm)
     
 end
@@ -119,12 +114,10 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
     if A.myrank == Nprocs - 1
         myrank_sendto = 0
     else
-        myrank_sendto = myrank + 1
+        myrank_sendto = A.myrank + 1
     end
 
-    if A.myrank == 0
-        println("set_wing! start")
-    end
+    #GC.gc()
     MPI.Barrier(A.comm)
 
     MPI.Win_fence(0, A.wings_back_window)
@@ -136,7 +129,7 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
     if A.myrank == 0
         myrank_sendto = Nprocs-1
     else
-        myrank_sendto = myrank - 1
+        myrank_sendto = A.myrank - 1
     end
 
     MPI.Win_fence(0,  A.wings_forward_window)
@@ -144,9 +137,7 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
     MPI.Win_fence(0,  A.wings_forward_window)
 
 
-    if A.myrank == 0
-        println("set_wing! end")
-    end
+
     MPI.Barrier(A.comm)
 
     #right wing
