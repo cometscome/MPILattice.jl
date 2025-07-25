@@ -3,7 +3,11 @@ uuid = "dd6a91e4-736f-4540-ac85-13822ca7b545"
 authors = ["Yuki Nagai <cometscome@gmail.com>"]
 version = "0.0.1"
 
+[deps]
+MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+
 [compat]
+MPI = "0.20.22"
 julia = "1.11"
 
 [extras]
