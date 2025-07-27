@@ -13,6 +13,9 @@ abstract type MLattice{T_array,Dim} end
 
 abstract type MLattice1D{T_array,NX,PE,Nwing} <: MLattice{T_array,1} end
 
+abstract type MLattice2D{T_array,NX,NY,PEs,Nwing} <: MLattice{T_array,2} end
+
+
 function parallel_for!(A::MLattice,f::Function,variables...)
     error("parallel_for!: Type $(typeof(A)) is not supported")
 end

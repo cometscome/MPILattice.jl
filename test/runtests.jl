@@ -16,14 +16,14 @@ function test()
     PE = Nprocs
     Nwing = 1
 
-    M1 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing)
+    M1 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing,elementtype=ComplexF64)
 
     display(M1)
 
-    A = zeros(1, NX)
+    A = zeros(ComplexF64,1, NX)
     A[:] = collect(1:NX)
     println(A)
-    B = zeros(1, NX)
+    B = zeros(ComplexF64,1, NX)
     B[:] = 10 .* collect(1:NX)
 
 
@@ -31,7 +31,7 @@ function test()
 
     M2 = MLattice1Dvector(A, PE,Nwing=Nwing)
     M3 = MLattice1Dvector(B, PE,Nwing=Nwing)
-    M4 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing)
+    M4 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing,elementtype=ComplexF64)
     
     display(M2)
 
@@ -90,7 +90,7 @@ function test()
     mul!(M1,M2,M6)
     display(M1)
 
-    @code_warntype mul!(M1,M2,M6)
+    #@code_warntype mul!(M1,M2,M6)
 
     return true
 end
@@ -175,5 +175,5 @@ end
 @testset "MPILattice.jl" begin
     # Write your tests here.
     test()
-    #test2()
+    test2()
 end

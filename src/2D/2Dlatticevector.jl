@@ -1,21 +1,25 @@
-include("kernels_1Dlatticevector.jl")
+#include("kernels_1Dlatticevector.jl")
 
-struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,PE,Nwing}
+function get_myrank_xy(myrank, PEs)
+    #myrank = ((myrank_y)*PEs[1] + myrank_x
+    myrank_x = myrank % PEs[1]
+    myrank_y = (i - myrank_x) ÷ PEs[1]
+    return myrank_x, myrank_y
+end
+
+struct MLattice2Dvector{T_array,NC,NX,NY,PEs,Nwing,Nprocs} <: MLattice2D{T_array,NX,NY,PEs,Nwing}
     data::T_array
-    PN::NTuple{1,Int64} #number of sites in each process
+    PN::NTuple{2,Int64} #number of sites in each process
     myrank::Int64
+    myrank_xy::NTuple{2,Int64}
     #wings_back::T_array
     #wings_back_window::MPI.Win
     #wings_forward::T_array
     #wings_forward_window::MPI.Win
     comm::MPI.Comm
     datashifted::T_array
-    cart::MPI.Comm
-    myrank_left::Int64
-    myrank_right::Int64
-    
 
-    function MLattice1Dvector(NC::Integer, NX::Integer, PE::Integer;
+    function MLattice2Dvector(NC::Integer, NX::Integer, NY::Integer,PEs::NTuple{2,Integer};
         elementtype=Float64,
         mpiinit=true,
         Nwing=1,
@@ -28,26 +32,15 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
         end
         #MPI.Barrier(comm)
 
-        @assert NX % PE == 0 "NX % PE should be 0. Now NX = $NX and PE = $PE"
-        PN = (NX ÷ PE,)
+        @assert NX % PEs[1] == 0 "NX % PEs[1] should be 0. Now NX = $NX and PEs[1] = $(PEs[1])"
+        @assert NY % PEs[2] == 0 "NY % PEs[2] should be 0. Now NX = $NY and PEs[1] = $(PEs[2])"
+        PNs = (NX ÷ PEs[1],NY ÷ PEs[2])
         Nprocs = MPI.Comm_size(comm)
-        @assert PE == Nprocs "num. of MPI process should be PE. Now Nprocs = $Nprocs and PE = $PE"
+        @assert prod(PEs) == Nprocs "num. of MPI process should be prod(PEs). Now Nprocs = $Nprocs and PEs = $PEs"
         myrank = MPI.Comm_rank(comm)
+        myrank_xy = get_myrank_xy(myrank, PEs)
 
-        nprocs = MPI.Comm_size(comm)
-        dims = (nprocs,)
-        cart   = MPI.Cart_create(comm, dims, periodic=map(_->true, dims))
-        left, right = MPI.Cart_shift(cart, 0, -1)[2], MPI.Cart_shift(cart, 0, +1)[2]
-
-        #println(typeof(cart))
-        #println(typeof(left))
-        #println(typeof(right))
-        #error("d")
-
-
-        data_0 = zeros(elementtype, NC, PN[1]+2Nwing)
-        data = JACC.array(data_0)
-
+        data = zeros(elementtype, NC, PN[1]+2Nwing,PN[2]+2Nwing)
 
         #wings_back = zeros(elementtype, NC, Nwing)
         #wings_back_window = MPI.Win_create(wings_back, comm)
@@ -57,33 +50,30 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
 
         T_array = typeof(data)
 
-        datashifted_0 = zeros(elementtype, NC, PN[1])
-        datashifted = JACC.array(datashifted_0)
+        datashifted = zeros(elementtype, NC, PN[1],PN[2])
 
-        return new{T_array,NC,NX,PE,Nwing,Nprocs}(data, PN, myrank,
+        return new{T_array,NC,NX,NY,PEs,Nwing,Nprocs}(data, PNs, myrank,
+            myrank_xy,
             #wings_back,
             #wings_back_window,
             #wings_forward,
             #wings_forward_window,
             comm,
-            datashifted,
-            cart,
-            left,
-            right)
+            datashifted)
     end
 
-    function MLattice1Dvector(A::AbstractMatrix{T}, PE::Integer;
+    function MLattice2Dvector(A::AbstractMatrix{T}, PEs::NTuple{2,Integer};
         mpiinit=true,
         Nwing=1,
         comm=MPI.COMM_WORLD) where T
 
-        NC, NX = size(A)
+        NC, NX,NY = size(A)
         elementtype = eltype(A)
 
         #GC.gc()
        
 
-        M = MLattice1Dvector(NC, NX, PE;
+        M = MLattice2Dvector(NC, NX, NY, PEs;
             elementtype,
             mpiinit,
             Nwing,
@@ -92,17 +82,17 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
 
         #GC.gc()
         MPI.Barrier(comm)
-        datacpu = Array(M.data)
 
-        for i = 1:M.PN[1]
-            ix = get_ix(i, M.myrank, M.PN[1])
-            for ic = 1:NC
-                #println(A[ic, ix],(ic, i+Nwing))
-                datacpu[ic, i+Nwing] = A[ic, ix]
+        for i2 = 1:M.PN[1]
+            iy = get_ix(i2, M.myrank_xy[2], M.PN[2])
+            for i1 = 1:M.PN[1]
+                ix = get_ix(i1, M.myrank_xy[1], M.PN[1])
+                for ic = 1:NC
+                    #println(A[ic, ix],(ic, i+Nwing))
+                    M.data[ic, ix+Nwing,iy+Nwing] = A[ic, ix,iy]
+                end
             end
         end
-        datagpu = JACC.array(datacpu)
-        M.data .= datagpu
 
         set_wing!(M)
 
@@ -112,15 +102,15 @@ end
 
 
 
-function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
-    B::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
+function LinearAlgebra.mul!(C::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    B::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs}
     JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul!,C.data,A.data,B.data,NC,Nwing)
     set_wing!(C) 
 end
 
-function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
-    B::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift}) where 
+function LinearAlgebra.mul!(C::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    B::Shifted_1DLattice{MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs,shift}
     if -Nwing <= shift && shift <= Nwing 
         JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedB!,C.data,A.data,B.data.data,NC,Nwing,shift)
@@ -130,9 +120,9 @@ function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A
     set_wing!(C) 
 end
 
-function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
-    A::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift},
-    B::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
+function LinearAlgebra.mul!(C::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    A::Shifted_1DLattice{MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift},
+    B::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs,shift}
     if -Nwing <= shift && shift <= Nwing 
         JACC.parallel_for(C.PN[1],jaccMPI_kernel_mul_shiftedA!,C.data,A.data.data,B.data,NC,Nwing,shift)
@@ -142,9 +132,9 @@ function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
     set_wing!(C) 
 end
 
-function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
-    A::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift1},
-    B::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift2}) where 
+function LinearAlgebra.mul!(C::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    A::Shifted_1DLattice{MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift1},
+    B::Shifted_1DLattice{MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift2}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs,shift1,shift2}
     if -Nwing <= shift1 && shift1 <= Nwing 
         if -Nwing <= shift2 && shift2 <= Nwing 
@@ -162,14 +152,14 @@ function LinearAlgebra.mul!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
     set_wing!(C) 
 end
 
-function substitute!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
+function substitute!(C::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},A::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs}
     JACC.parallel_for(C.PN[1],jaccMPI_kernel_substitute!,C.data,A.data,NC,Nwing)
     set_wing!(C) 
 end
 
-function substitute!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
-    A::Shifted_1DLattice{MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift}) where 
+function substitute!(C::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
+    A::Shifted_1DLattice{MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},T_array,shift}) where 
     {T_array,NC,NX,PE,Nwing,Nprocs,shift}
     if -Nwing <= shift && shift <= Nwing 
         JACC.parallel_for(C.PN[1],jaccMPI_kernel_substitute_shiftedA!,C.data,A.data.data,NC,Nwing,shift)
@@ -179,7 +169,7 @@ function substitute!(C::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},
     set_wing!(C) 
 end
 
-function shift_lattice(data::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},shift) where 
+function shift_lattice(data::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},shift) where 
         {T_array,NC,NX,PE,Nwing,Nprocs} 
     if abs(shift) > Nwing
         make_shifteddata!(data,shift) 
@@ -195,7 +185,7 @@ function check_rank(ix,PN)
     return rank,i
 end
 
-function make_shifteddata!(data::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs},shift) where 
+function make_shifteddata!(data::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs},shift) where 
         {T_array,NC,NX,PE,Nwing,Nprocs} 
     win = MPI.Win_create(data.datashifted, data.comm)
 
@@ -220,11 +210,11 @@ end
 
 
 
-function get_datatype(::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
+function get_datatype(::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
     return T_array
 end
 
-function Base.getindex(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}, ic,i::Int) where {T_array,NC,NX,PE,Nwing,Nprocs}
+function Base.getindex(A::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}, ic,i::Int) where {T_array,NC,NX,PE,Nwing,Nprocs}
     iout = get_localindex(i,A.myrank,A.PN[1],Nwing)
     isinside =(iout in 1:(A.PN[1]+2Nwing))
     if isinside
@@ -238,7 +228,7 @@ function Base.getindex(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}, ic,i:
 end
 
 
-function Base.display(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
+function Base.display(A::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
     for myrank_i = 0:Nprocs-1
         #println(myrank_i)
         #MPI.Barrier(A.comm)
@@ -261,7 +251,7 @@ end
 
 
 
-function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
+function set_wing!(A::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
     #back wing
     if A.myrank == Nprocs - 1
         myrank_sendto = 0
@@ -272,35 +262,19 @@ function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_
     #GC.gc()
     #println("myrank = $(A.myrank) $(A.wings_back)")
     MPI.Barrier(A.comm)
-    #wings_back_window = MPI.Win_create(A.wings_back, A.comm)
-    #@time MPI.Win_create(A.wings_back, A.comm)
-    win = MPI.Win_create(A.data,A.comm)
-
-    MPI.Win_fence(0, win)
-
-    #MPI.Get(@view(A.data[:,1:Nwing]), A.myrank_left, (A.PN[1]-Nwing+1)*NC,win)
-    #MPI.Get(@view(A.data[:,A.PN[1]+1:A.PN[1]+Nwing]), A.myrank_right, 0,win)
-
-    MPI.Put(@view(A.data[:,Nwing+1:Nwing+Nwing]), A.myrank_left, (A.PN[1]+Nwing)*NC,win)
-    MPI.Put(@view(A.data[:,A.PN[1]+1:(A.PN[1]+Nwing)]), A.myrank_right, 0,win)
-
-
-    #if A.myrank_right != MPI.PROC_NULL
-    #    MPI.Get(@view(A.data[:,A.PN[1]+Nwing:A.PN[1]+Nwing+Nwing]), A.myrank_right, (Nwing)*NC,win)
-    #end
-    MPI.Win_fence(0, win)
-    MPI.free(win)
-    return
-
-    #=
     wings_back_window = MPI.Win_create(A.wings_back, A.comm)
-    MPI.free(wings_back_window)
+    #@time MPI.Win_create(A.wings_back, A.comm)
+
+    MPI.Win_fence(0, wings_back_window)
+    #display(A.data)
+    #display(wings_back_window)
+    #println(view(A.data, 1:NC, (A.PN[1]-Nwing+1):A.PN[1]))
+    #println("myrank_sendto $myrank_sendto $(A.myrank)")
     istart = Nwing + A.PN[1] - Nwing + 1
     iend = Nwing +A.PN[1]
     MPI.Put(A.data[ 1:NC, istart:iend], myrank_sendto, wings_back_window)
     MPI.Win_fence(0, wings_back_window)
     MPI.free(wings_back_window)
-    =#
 
     #println("myrank = $(A.myrank) $(A.wings_back)")
     for i=1:Nwing
