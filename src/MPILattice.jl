@@ -27,8 +27,8 @@ end
 
 
 
-
-
+include("Lattice.jl")
+include("HaloComm.jl")
 include("1D/1Dlatticevector.jl")
 include("1D/1Dlatticematrix.jl")
 

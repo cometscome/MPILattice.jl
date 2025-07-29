@@ -10,9 +10,12 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
     #wings_forward_window::MPI.Win
     comm::MPI.Comm
     datashifted::T_array
+    #halo::HaloComm1D{T}
+    
     cart::MPI.Comm
     myrank_left::Int64
     myrank_right::Int64
+   
     
 
     function MLattice1Dvector(NC::Integer, NX::Integer, PE::Integer;
@@ -33,8 +36,29 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
         Nprocs = MPI.Comm_size(comm)
         @assert PE == Nprocs "num. of MPI process should be PE. Now Nprocs = $Nprocs and PE = $PE"
         myrank = MPI.Comm_rank(comm)
-
         nprocs = MPI.Comm_size(comm)
+        #=
+
+        data_0 = zeros(elementtype, NC, PN[1]+2Nwing)
+        data = JACC.array(data_0)
+
+
+        T_array = typeof(data)
+
+        datashifted_0 = zeros(elementtype, NC, PN[1])
+        datashifted = JACC.array(datashifted_0)
+
+        halo = HaloComm1D(elementtype, NC, NX, Nwing)
+
+
+
+        return new{T_array,NC,NX,PE,Nwing,Nprocs,elementtype}(data, PN, myrank,
+            comm,
+            datashifted,
+            halo)
+
+=#
+            
         dims = (nprocs,)
         cart   = MPI.Cart_create(comm, dims, periodic=map(_->true, dims))
         left, right = MPI.Cart_shift(cart, 0, -1)[2], MPI.Cart_shift(cart, 0, +1)[2]
@@ -70,6 +94,7 @@ struct MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs} <: MLattice1D{T_array,NX,
             cart,
             left,
             right)
+            
     end
 
     function MLattice1Dvector(A::AbstractMatrix{T}, PE::Integer;
@@ -239,6 +264,7 @@ end
 
 
 function Base.display(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
+    Acpu = Array(A.data)
     for myrank_i = 0:Nprocs-1
         #println(myrank_i)
         #MPI.Barrier(A.comm)
@@ -248,7 +274,7 @@ function Base.display(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where 
             for i = 1:A.PN[1]
                 ix = get_ix(i, A.myrank, A.PN[1])
                 for ic = 1:NC
-                    println("$ic \t $ix \t $(A.data[ic,i+Nwing])")
+                    println("$ic \t $ix \t $(Acpu[ic,i+Nwing])")
                 end
             end
         end
@@ -262,6 +288,10 @@ end
 
 
 function set_wing!(A::MLattice1Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
+
+    #exchange!(A.halo,A.data)
+
+    #return 
     #back wing
     if A.myrank == Nprocs - 1
         myrank_sendto = 0

@@ -18,6 +18,13 @@ struct MLattice2Dvector{T_array,NC,NX,NY,PEs,Nwing,Nprocs} <: MLattice2D{T_array
     #wings_forward_window::MPI.Win
     comm::MPI.Comm
     datashifted::T_array
+    cart::MPI.Comm
+    myrank_left::Int64
+    myrank_right::Int64
+    myrank_up::Int64
+    myrank_down::Int64
+    myrank_ur_ul_dr_dl::NTuple{4,Int64}
+
 
     function MLattice2Dvector(NC::Integer, NX::Integer, NY::Integer,PEs::NTuple{2,Integer};
         elementtype=Float64,
@@ -38,6 +45,28 @@ struct MLattice2Dvector{T_array,NC,NX,NY,PEs,Nwing,Nprocs} <: MLattice2D{T_array
         Nprocs = MPI.Comm_size(comm)
         @assert prod(PEs) == Nprocs "num. of MPI process should be prod(PEs). Now Nprocs = $Nprocs and PEs = $PEs"
         myrank = MPI.Comm_rank(comm)
+        nprocs = MPI.Comm_size(comm)
+        dims = PEs
+        cart   = MPI.Cart_create(comm, dims, periodic=map(_->true, dims))
+        left, right = MPI.Cart_shift(cart, 0, -1)[2], MPI.Cart_shift(cart, 0, +1)[2]
+        up,  down  = MPI.Cart_shift(cart, 0, -1)[2], MPI.Cart_shift(cart, 0, +1)[2]
+
+        coords  = MPI.Cart_coords(cart, rank)        # (row, col)
+        up_right_coords = (coords[1]-1, coords[2]+1) # (-1, +1)
+        upright = MPI.Cart_rank(cart, up_right_coords; reorder=false)
+        up_left_coords = (coords[1]-1, coords[2]-1) # (-1, -1)
+        upleft = MPI.Cart_rank(cart, up_left_coords; reorder=false)
+        down_right_coords = (coords[1]+1, coords[2]+1) # (+1, +1)
+        downright = MPI.Cart_rank(cart, down_right_coords; reorder=false)
+        down_left_coords = (coords[1]+1, coords[2]-1) # (+1, -1)
+        downleft = MPI.Cart_rank(cart, down_left_coords; reorder=false)
+
+        ur_ul_dr_dl = (upright,upleft,downright,downleft)
+
+        #left, right = MPI.Cart_shift(cart, 1, -1)[2], MPI.Cart_shift(cart, 1, +1)[2]
+
+
+
         myrank_xy = get_myrank_xy(myrank, PEs)
 
         data = zeros(elementtype, NC, PN[1]+2Nwing,PN[2]+2Nwing)
@@ -59,7 +88,14 @@ struct MLattice2Dvector{T_array,NC,NX,NY,PEs,Nwing,Nprocs} <: MLattice2D{T_array
             #wings_forward,
             #wings_forward_window,
             comm,
-            datashifted)
+            datashifted,
+            cart,
+            left,
+            right,
+            up,
+            down,
+            ur_ul_dr_dl
+            )
     end
 
     function MLattice2Dvector(A::AbstractMatrix{T}, PEs::NTuple{2,Integer};
@@ -252,12 +288,31 @@ end
 
 
 function set_wing!(A::MLattice2Dvector{T_array,NC,NX,PE,Nwing,Nprocs}) where {T_array,NC,NX,PE,Nwing,Nprocs}
+
+    win = MPI.Win_create(A.data,A.comm)
+
+    MPI.Win_fence(0, win)
+
+    #MPI.Get(@view(A.data[:,1:Nwing]), A.myrank_left, (A.PN[1]-Nwing+1)*NC,win)
+    #MPI.Get(@view(A.data[:,A.PN[1]+1:A.PN[1]+Nwing]), A.myrank_right, 0,win)
+
+    ista = 
+    MPI.Put(@view(A.data[:,Nwing+1:Nwing+Nwing]), A.myrank_left, (A.PN[1]+Nwing)*NC,win)
+    MPI.Put(@view(A.data[:,A.PN[1]+1:(A.PN[1]+Nwing)]), A.myrank_right, 0,win)
+
+
+    return 
+
     #back wing
     if A.myrank == Nprocs - 1
         myrank_sendto = 0
     else
         myrank_sendto = A.myrank + 1
     end
+
+    
+
+    return 
 
     #GC.gc()
     #println("myrank = $(A.myrank) $(A.wings_back)")

@@ -5,6 +5,75 @@ import JACC
 using LinearAlgebra
 using InteractiveUtils
 JACC.@init_backend
+    using MPI, JACC, StaticArrays
+
+function latticetest()
+    MPI.Init()
+    NC = 3
+    dim = 1
+    NX = 8
+    NY = 8
+    gsize = (NX,)
+    nprocs = MPI.Comm_size(MPI.COMM_WORLD)
+    PEs = (nprocs,)
+    A = Lattice(NC,dim,gsize,PEs)
+
+    set_halo!(A)
+end
+
+
+
+
+function halotest()
+    MPI.Init()
+    NC = 3
+    NX = 12
+    Nw = 1
+    comm = MPI.MPI.COMM_WORLD
+    Nprocs = MPI.Comm_size(comm)
+    h = HaloComm1D(Float64, NC, NX, Nw)
+
+    PE = Nprocs
+    Nwing = 1
+
+    M1 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing,elementtype=ComplexF64)
+
+    display(M1)
+
+    A = zeros(ComplexF64,1, NX)
+    A[:] = collect(1:NX)
+    println(A)
+    B = zeros(ComplexF64,1, NX)
+    B[:] = 10 .* collect(1:NX)
+
+
+    
+
+    M2 = MLattice1Dvector(A, PE,Nwing=Nwing)
+    M3 = MLattice1Dvector(B, PE,Nwing=Nwing)
+    M4 = MLattice1Dvector(NC, NX, PE;Nwing=Nwing,elementtype=ComplexF64)
+    
+    display(M2)
+
+    if M2.myrank == 0
+        for ix=1-Nwing:NX+Nwing
+            println("$ix $(M2[1:NC,ix])")
+        end
+    end
+
+    MPI.Barrier(comm)
+
+    if M2.myrank == 1
+        for ix=1-Nwing:NX+Nwing
+            println("$ix $(M2[1:NC,ix])")
+        end
+    end
+
+    MPI.Barrier(comm)
+
+    mul!(M1,M2,M3)
+
+end
 
 function test()
     MPI.Init()
@@ -174,6 +243,9 @@ end
 
 @testset "MPILattice.jl" begin
     # Write your tests here.
-    test()
-    test2()
+    latticetest()
+    #halotest()
+    #test()
+    #test2()
+    #test1d()
 end
