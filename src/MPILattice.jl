@@ -16,7 +16,7 @@ abstract type MLattice1D{T_array,NX,PE,Nwing} <: MLattice{T_array,1} end
 abstract type MLattice2D{T_array,NX,NY,PEs,Nwing} <: MLattice{T_array,2} end
 
 
-function parallel_for!(A::MLattice,f::Function,variables...)
+function parallel_for!(A::MLattice, f::Function, variables...)
     error("parallel_for!: Type $(typeof(A)) is not supported")
 end
 
@@ -28,6 +28,7 @@ end
 
 
 include("Lattice.jl")
+include("LatticeMatrix.jl")
 include("HaloComm.jl")
 include("1D/1Dlatticevector.jl")
 include("1D/1Dlatticematrix.jl")
@@ -37,11 +38,11 @@ function get_ix(i, myrank, PN)
     return ix
 end
 
-function check_index(i,NLX,Nwing)
+function check_index(i, NLX, Nwing)
     #println(i)
     isinside = (i in (1-Nwing):(NLX+Nwing))
     isback = (i in 1-Nwing:0)
-    
+
     isforward = (i in NLX+1:NLX+Nwing)
     if isinside
         if isback
@@ -56,10 +57,10 @@ function check_index(i,NLX,Nwing)
     end
 
     #println((iout,isinside,isback,isforward))
-    return iout,isinside,isback,isforward
+    return iout, isinside, isback, isforward
 end
 
-function get_localindex(ix,myrank,PN,Nwing)
+function get_localindex(ix, myrank, PN, Nwing)
     i = ix - PN * myrank
     #iout,isinside,isback,isforward = check_index(i,PN,Nwing)
     return i + Nwing
