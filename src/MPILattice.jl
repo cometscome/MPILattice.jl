@@ -7,7 +7,7 @@ using JACC
 abstract type Lattice{D,T,AT} end
 
 include("Lattice.jl")
-include("LatticeMatrix.jl")
+include("Latticematrix.jl")
 include("LinearAlgebras/linearalgebra.jl")
 
 
