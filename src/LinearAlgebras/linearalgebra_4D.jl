@@ -20,10 +20,14 @@ function get_4Dindex(i, dims)
     return ix, iy, iz, it
 end
 
+struct Mulkernel{NC1,NC2,NC3}
+end
+
 function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
     A::LatticeMatrix{4,T2,AT2,NC1,NC3}, B::LatticeMatrix{4,T3,AT3,NC3,NC2}) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
+    mulkernel = Mulkernel{NC1,NC2,NC3}()
     JACC.parallel_for(
-        prod(C.PN), kernel_4Dmatrix_mul!, C.A, A.A, B.A, NC1, NC2, NC3, C.nw, C.dims
+        prod(C.PN), kernel_4Dmatrix_mul!, C.A, A.A, B.A, mulkernel, C.nw, C.dims
     )
     set_halo!(C)
 end
@@ -35,7 +39,7 @@ function kernel_4Dvector_mul!(i, C, A, B, NC, nw, dims)
     end
 end
 
-function kernel_4Dmatrix_mul!(i, C, A, B, NC1, NC2, NC3, nw, dims)
+function kernel_4Dmatrix_mul!(i, C, A, B, mulkernel::Mulkernel{NC1,NC2,NC3}, nw, dims) where {NC1,NC2,NC3}
     indices = get_4Dindex(i, dims)
     @inbounds for ic = 1:NC1
         for jc = 1:NC2
