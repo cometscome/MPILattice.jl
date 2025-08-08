@@ -114,6 +114,47 @@ function latticetest2D()
 
 end
 
+function latticetest4D()
+    MPI.Init()
+    NC = 1
+    dim = 4
+    NX = 8
+    NY = 8
+    NZ = 8
+    NT = 8
+    gsize = (NX, NY, NZ, NT)
+    #gsize = (NX, NY)
+    nw = 1
+
+    nprocs = MPI.Comm_size(MPI.COMM_WORLD)
+    if length(ARGS) == 0
+        n1 = nprocs ÷ 2
+        if n1 == 0
+            n1 = 1
+        end
+        PEs = (n1, nprocs ÷ n1, 1, 1)
+    else
+        PEs = Tuple(parse.(Int64, ARGS))
+    end
+    M1 = LatticeMatrix(NC, NC, dim, gsize, PEs; nw)
+    comm = M1.cart
+
+    A = rand(NC, NC, NX, NY, NZ, NT)
+    M2 = LatticeMatrix(A, dim, PEs; nw)
+
+
+    if M2.myrank == 0
+        display(A[:, :, NX, NY, NZ, NT])
+        display(M2.A[:, :, 1, 1, 1, 1])
+    end
+
+
+    if M2.myrank == 0
+        display(A[:, :, NX, 1, 2, 1])
+        display(M2.A[:, :, 1, 1+nw, 2+nw, 1+nw])
+    end
+end
+
 function latticetest()
     MPI.Init()
     NC = 2
@@ -417,7 +458,8 @@ end
 @testset "MPILattice.jl" begin
     # Write your tests here.
     #testcart()
-    latticetest2D()
+    latticetest4D()
+    #latticetest2D()
     #latticetest()
     #halotest()
     #test()
