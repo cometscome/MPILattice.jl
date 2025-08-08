@@ -1,5 +1,5 @@
 ##############################################################################
-#  Lattice (no derived datatypes version)
+#  LatticeVector (no derived datatypes version)
 #  --------------------------------------
 #  * column-major layout   :  (NC , X , Y , …)
 #  * halo width            :  nw
@@ -16,7 +16,7 @@ using MPI, StaticArrays, JACC
 # ---------------------------------------------------------------------------
 # container  (faces / derived datatypes are GONE)
 # ---------------------------------------------------------------------------
-struct Lattice{D,T,AT}
+struct LatticeVector{D,T,AT} <: Lattice{D,T,AT}
     nw::Int                          # ghost width
     phases::SVector{D,T}                 # phases
     NC::Int                          # internal DoF
@@ -36,7 +36,7 @@ end
 # ---------------------------------------------------------------------------
 # constructor + heavy init (still cheap to call)
 # ---------------------------------------------------------------------------
-function Lattice(NC, dim, gsize, PEs; nw=1, elementtype=ComplexF64, phases=ones(dim), comm0=MPI.COMM_WORLD)
+function LatticeVector(NC, dim, gsize, PEs; nw=1, elementtype=ComplexF64, phases=ones(dim), comm0=MPI.COMM_WORLD)
 
     # Cartesian grid
     D = dim
@@ -66,12 +66,12 @@ function Lattice(NC, dim, gsize, PEs; nw=1, elementtype=ComplexF64, phases=ones(
 
     PN = ntuple(i -> gsize[i] ÷ dims[i], D)
 
-    return Lattice{D,T,typeof(A)}(nw, phases, NC, gsize,
+    return LatticeVector{D,T,typeof(A)}(nw, phases, NC, gsize,
         cart, Tuple(coords), dims, nbr,
         A, buf, MPI.Comm_rank(cart), PN)
 end
 
-function Lattice(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD)
+function LatticeVector(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD)
 
     NC, NN... = size(A)
     elementtype = eltype(A)
@@ -82,7 +82,7 @@ function Lattice(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD)
         gsize = NN
     end
 
-    ls = Lattice(NC, dim, gsize, PEs; elementtype, nw, phases, comm0)
+    ls = LatticeVector(NC, dim, gsize, PEs; elementtype, nw, phases, comm0)
     MPI.Bcast!(A, ls.cart)
     Acpu = Array(ls.A)
 
@@ -112,21 +112,21 @@ function Lattice(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD)
 
 end
 
-function get_globalrange(ls::Lattice{D,T,TA}, dim) where {D,T,TA}
+function get_globalrange(ls::LatticeVector{D,T,TA}, dim) where {D,T,TA}
     coords_r = MPI.Cart_coords(ls.cart, ls.myrank)
     istart = get_globalindex(ls, 1, dim, coords_r[dim])
     iend = get_globalindex(ls, ls.PN[dim], dim, coords_r[dim])
     return istart:iend
 end
 
-function get_globalindex(ls::Lattice{D,T,TA}, i, dim, myrank_dim) where {D,T,TA}
+function get_globalindex(ls::LatticeVector{D,T,TA}, i, dim, myrank_dim) where {D,T,TA}
     ix = i + ls.PN[dim] * myrank_dim
     return ix
 end
 
 
 
-function set_halo!(ls::Lattice{D,T,TA}) where {D,T,TA}
+function set_halo!(ls::LatticeVector{D,T,TA}) where {D,T,TA}
     for id = 1:D
         exchange_dim!(ls, id)
     end
@@ -192,7 +192,7 @@ end
 #    then passed to MPI.Isend
 #  * recv-buffers are passed to MPI.Irecv!  and finally copied into `_ghost`
 ##############################################################################
-function exchange_dim!(ls::Lattice{D}, d::Int) where D
+function exchange_dim!(ls::LatticeVector{D}, d::Int) where D
     # buffer indices
     iSM, iRM = 4d - 3, 4d - 2
     iSP, iRP = 4d - 1, 4d
@@ -285,7 +285,7 @@ end
 # ---------------------------------------------------------------------------
 # hooks (user overrides)
 # ---------------------------------------------------------------------------
-compute_interior!(ls::Lattice) = nothing
-compute_boundary!(ls::Lattice) = nothing
+compute_interior!(ls::LatticeVector) = nothing
+compute_boundary!(ls::LatticeVector) = nothing
 
-export Lattice
+export LatticeVector

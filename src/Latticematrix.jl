@@ -16,7 +16,7 @@ using MPI, StaticArrays, JACC
 # ---------------------------------------------------------------------------
 # container  (faces / derived datatypes are GONE)
 # ---------------------------------------------------------------------------
-struct LatticeMatrix{D,T,AT,NC1,NC2}
+struct LatticeMatrix{D,T,AT,NC1,NC2} <: Lattice{D,T,AT}
     nw::Int                          # ghost width
     phases::SVector{D,T}                 # phases
     NC1::Int
@@ -50,6 +50,7 @@ function LatticeMatrix(NC1, NC2, dim, gsize, PEs; nw=1, elementtype=ComplexF64, 
     #coords= MPI.Cart_coords(cart, MPI.Comm_rank(cart))
     nbr = ntuple(d -> ntuple(s -> MPI.Cart_shift(cart, d - 1, ifelse(s == 1, -1, 1))[2], 2), D)
     # local array (NC first)
+    println(gsize)
     locS = ntuple(i -> gsize[i] ÷ dims[i] + 2nw, D)
     loc = (NC1, NC2, locS...)
     A = JACC.zeros(T, loc...)
@@ -80,11 +81,12 @@ function LatticeMatrix(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD
     elementtype = eltype(A)
 
     @assert dim == length(NN) "Dimension mismatch: expected $dim, got $(length(NN))"
-    if dim == 1
-        gsize = (NN,)
-    else
-        gsize = NN
-    end
+    #if dim == 1
+    #    gsize = (NN,)
+    #else
+    #    gsize = NN
+    #end
+    gsize = NN
 
     ls = LatticeMatrix(NC1, NC2, dim, gsize, PEs; elementtype, nw, phases, comm0)
     MPI.Bcast!(A, ls.cart)
