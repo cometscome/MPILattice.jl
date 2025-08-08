@@ -7,6 +7,35 @@ using InteractiveUtils
 JACC.@init_backend
     using MPI, JACC, StaticArrays
 
+function mpitest()
+    #using MPI
+    MPI.Init()
+
+    comm  = MPI.COMM_WORLD
+    rank  = MPI.Comm_rank(comm)
+
+    # ─ 派生データ型を作成（ここでは配列末尾 3 要素だけ送る例） ─
+    A   = rand(Float64, 10)
+    subs = [3]                      # 送りたい長さ
+    offs = [7]                      # 0-based start index (=7 → 8–10 番目)
+    dt   = MPI.Type_create_subarray(1, size(A), subs, offs,
+                                    MPI.ORDER_FORTRAN, MPI.Datatype(Float64))
+    MPI.Type_commit(dt)
+
+    if rank == 0
+        req = MPI.Isend(A, 1, 0, comm; datatype = dt)   # ← 明示指定
+        MPI.Wait(req)
+    elseif rank == 1
+        buf = zeros(Float64, 3)
+        req = MPI.Irecv!(buf, 0, 0, comm; datatype = dt)
+        MPI.Wait(req)
+        @show buf   # ⇒ 送られてきた 8–10 番目の値だけが入る
+    end
+    MPI.Finalize()
+end
+#mpitest()
+#return
+
 function latticetest()
     MPI.Init()
     NC = 3

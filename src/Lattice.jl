@@ -1,207 +1,225 @@
-using StaticArrays
-# -----------------------------------------------------------------------------  
-# Main container
-# -----------------------------------------------------------------------------
-struct Lattice{D,T,TA,T1}
-    nw       ::Int                  # ghost width
-    phases        ::SVector{D,T1}         # per-direction phase
-    NC       ::Int                  # internal DoF per site
-    gsize    ::NTuple{D,Int}        # global lattice size
-    cart     ::MPI.Comm             # Cartesian communicator
-    coords   ::NTuple{D,Int}        # my coordinates
-    dims     ::NTuple{D,Int}        # Px×Py(×Pz…)
-    nbr      ::NTuple{D,NTuple{2,Int}} # neighbor ranks [dim][±]
-    A        ::TA # main field (device or host)
-    buf      ::Vector{TA} # send/recv buffers (± per dim)
-    types    ::Dict{Tuple{Int,Symbol},MPI.Datatype} # face datatypes
-    myrank   ::Int
+##############################################################################
+#  Lattice (no derived datatypes version)
+#  --------------------------------------
+#  * column-major layout   :  (NC , X , Y , …)
+#  * halo width            :  nw
+#  * per–direction phases  :  φ
+#  * internal DoF          :  NC  (fastest dim)
+#  * ALWAYS packs faces into contiguous buffers and sends them as
+#    plain arrays (no MPI_Type_create_subarray, no commit/free hustle).
+#
+#  Back-end: CPU threads / CUDA / ROCm via JACC.
+##############################################################################
 
-
-    function Lattice(NC,dim,gsize,PEs;nw=1,elementtype=ComplexF64,phases=ones(dim),comm=MPI.COMM_WORLD) 
-        D = dim
-        dims = PEs
-        @assert length(phases) == D
-        cart  = MPI.Cart_create(comm, dims; periodic=ntuple(_->true,D))
-        coords= MPI.Cart_coords(cart, MPI.Comm_rank(cart))
-        nbr   = ntuple(d->ntuple(s->MPI.Cart_shift(cart,d-1,s-1)[2],2),D)
-        types = Dict{Tuple{Int,Symbol},MPI.Datatype}()
-
-        locS = ntuple(i->gsize[i] ÷ dims[i] + 2nw, D)
-        loc  = (NC,locS...) 
-        A = JACC.zeros(elementtype,loc...)
-        myrank = MPI.Comm_rank(comm)
-
-        #per-dim send/recv buffers (±)
-        # Buffers (minus/plus per dim)
-        buf = Vector{typeof(A)}(undef, 2D)
-        for d in 1:D
-            shp = ntuple(i-> i==d ? nw : locS[i], D)
-            buf[2d-1] = JACC.zeros(eltype(phases), (NC, shp...)...) # minus
-            buf[2d  ] = JACC.zeros(eltype(phases), (NC, shp...)...) # plus
-        end
-
-        #=
-        buf = Vector{typeof(A)}(undef, 2D)
-        for d in 1:D
-            shape = ntuple(i->i==d ? nw : locS[i], D)
-            push!(buf,  JACC.zeros(elementtype, shape..., NC)) # minus
-            push!(buf,  JACC.zeros(elementtype, shape..., NC)) # plus
-        end
-        =#
-
-        #MPI datatypes for faces
-        for d in 1:D, side in (:minus,:plus)
-            sz    = size(A)
-            subs  = collect(sz); subs[d] = nw
-            offs  = fill(0,D+1)
-            offs[d] = (side==:minus ? nw : sz[d]-2nw)
-            T= MPI.Types.create_subarray(sz, subs, offs,MPI.Datatype(elementtype))
-            MPI.Types.commit!(T)
-            types[(d,side)] = T
-        end
-        T1 = eltype(phases)
-        phases_s = SVector{dim}(phases)
-        
-        
-
-        return new{D,elementtype,typeof(A),T1}(
-            nw, 
-            phases_s, 
-            NC, 
-            gsize, 
-            cart,
-            Tuple(coords),
-            dims,
-            nbr,
-            A,
-            buf,
-            types,
-            myrank
-            )
-    end
-end
-
-
-
-@inline apply_phase!(buf, phase) =
-    JACC.parallel_for(length(buf)) do i; buf[i] *= phase; end
-
+using MPI, StaticArrays, JACC
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# container  (faces / derived datatypes are GONE)
 # ---------------------------------------------------------------------------
-"""
-    _face_view(A, nw, d, side)
+struct Lattice{D,T,AT}
+    nw      ::Int                          # ghost width
+    phases     ::SVector{D,T}                 # phases
+    NC      ::Int                          # internal DoF
+    gsize   ::NTuple{D,Int}                # global size
 
-Return a `@view` of the face (ghost–1 layer) in spatial dimension `d`
-(`d = 1 … D`) on the given `side` (`:minus` or `:plus`).
+    cart    ::MPI.Comm
+    coords  ::NTuple{D,Int}
+    dims    ::NTuple{D,Int}
+    nbr     ::NTuple{D,NTuple{2,Int}}
 
-* Array layout is `(NC, X, Y, Z, …)`, so the spatial dim maps to `d+1`.
-"""
-function _face_view(A, nw, d, side::Symbol)
-    idx = ntuple(_ -> Colon(), ndims(A))             # (:, :, :, …)
-    if side === :minus
-        rng = (nw + 1):(2nw)
-    else
-        sz  = size(A, d + 1)
-        rng = (sz - 2nw + 1):(sz - nw)
-    end
-    idx = Base.setindex(idx, rng, d + 1)             # replace d+1-th dim
-    @views return A[idx...]
+    A       ::AT                           # main array (NC first)
+    buf     ::Vector{AT}                   # 2D work buffers (minus/plus)
+    myrank  ::Int
 end
 
-"""
-    _ghost_view(A, nw, d, side)
+# ---------------------------------------------------------------------------
+# constructor + heavy init (still cheap to call)
+# ---------------------------------------------------------------------------
+function Lattice(NC,dim,gsize,PEs;nw=1,elementtype=ComplexF64,phases=ones(dim),comm0=MPI.COMM_WORLD) 
+#function Lattice(; nw::Int,
+#                   phases::SVector{D,T},
+#                   NC::Int,
+#                   gsize::NTuple{D,Int},
+#                   backend::String = "threads") where {D,T}
 
-Return a `@view` of the ghost cells **inside** the domain
-(first `nw` or last `nw` layers) for dimension `d`.
-"""
-function _ghost_view(A, nw, d, side::Symbol)
-    idx = ntuple(_ -> Colon(), ndims(A))
-    if side === :minus
-        rng = 1:nw
-    else
-        sz  = size(A, d + 1)
-        rng = (sz - nw + 1):sz
+
+
+    # Cartesian grid
+    D = dim
+    T = elementtype
+    dims  = PEs #MPI.dims_create(MPI.Comm_size(MPI.COMM_WORLD), D)
+    cart  = MPI.Cart_create(comm0, dims; periodic=ntuple(_->true,D))
+    coords= MPI.Cart_coords(cart, MPI.Comm_rank(cart))
+
+    #comm  = MPI.Cart_create(MPI.COMM_WORLD, dims; periods=ntuple(_->true,D))
+    #coords= MPI.Cart_coords(cart, MPI.Comm_rank(cart))
+    nbr   = ntuple(d -> ntuple(s -> MPI.Cart_shift(cart,d-1,ifelse(s==1,-1,1))[2], 2), D)
+    # local array (NC first)
+    locS = ntuple(i -> gsize[i] ÷ dims[i] + 2nw, D)
+    loc  = (NC, locS...)
+    A    = JACC.zeros(T, loc...)
+
+    # contiguous buffers for each face
+    buf  = Vector{typeof(A)}(undef, 4D)
+    for d in 1:D
+        shp = ntuple(i -> i==d ? nw : locS[i], D)   # halo slab shape
+        buf[4d-3] = JACC.zeros(T, (NC, shp...)...)  # minus side
+        buf[4d-2  ] = JACC.zeros(T, (NC, shp...)...)  # plus  side
+        buf[4d-1] = JACC.zeros(T, (NC, shp...)...)  # minus side
+        buf[4d  ] = JACC.zeros(T, (NC, shp...)...)  # plus  side
     end
-    idx = Base.setindex(idx, rng, d + 1)
-    @views return A[idx...]
+
+    return Lattice{D,T,typeof(A)}(nw, phases, NC, gsize,
+                                  cart, Tuple(coords), dims, nbr,
+                                  A, buf, MPI.Comm_rank(cart))
 end
-function set_halo!(ls::Lattice{D,T,TA,T1}) where {D,T,TA,T1}
+
+function Lattice(A,dim, PEs;nw=1,elementtype=ComplexF64,phases=ones(dim),comm0=MPI.COMM_WORLD) 
+    NC,NN = size(A)
+    elementtype = eltype(A)
+    @assert dim == length(NN)
+    gsize = NN
+
+    ls = Lattice(NC,dim,gsize,PEs;nw,phases,comm0) 
+    
+
+end
+
+function set_halo!(ls::Lattice{D,T,TA}) where {D,T,TA}
     for id=1:D
         exchange_dim!(ls, id)
     end
 end
 export set_halo!
 
-@inline _mul_phase!(X, p) = JACC.parallel_for(length(X)) do i; X[i] *= p; end
-
-
 # ---------------------------------------------------------------------------
-# One-dimensional halo exchange
+# helpers that build proper “view tuples” without parsing errors
 # ---------------------------------------------------------------------------
-function exchange_dim!(ls::Lattice{D,T,TA,T1}, d::Int) where {D,T,TA,T1}
-    #println(ls.buf)
-    bufM, bufP  = ls.buf[2d-1], ls.buf[2d]
-    rankM, rankP = ls.nbr[d]
-    myrank      = ls.myrank
-    req = MPI.Request[]
+"""
+    _face(A, nw, d, side)
 
-    # minus side
-    if rankM == myrank
-        copy!(_ghost_view(ls.A, ls.nw, d, :minus),
-              _face_view(ls.A,  ls.nw, d, :minus))
-        if ls.coords[d] == 0
-            _mul_phase!(_ghost_view(ls.A, ls.nw, d, :minus), ls.phases[d])
-        end
+Return a view of the halo–1 slab (width = `nw`) in spatial
+dimension `d` on `side = :minus | :plus`.
+
+* Array ordering is `(NC, X, Y, Z, …)` so the spatial
+  dimension maps to index `d + 1`.
+"""
+function _face(A, nw, d, side::Symbol)
+    # (1) decide the range WITHOUT the ternary-inside-range trick
+    face_rng = if side === :minus
+        (nw + 1) : (2 * nw)
     else
-        wrap = (ls.coords[d]==0)
-        if wrap
-            copy!(bufM, _face_view(ls.A, ls.nw, d, :minus))
-            _mul_phase!(bufM, ls.phases[d])
-            push!(req, MPI.Isend(bufM, rankM, d, ls.cart))
-        else
-            push!(req, MPI.Isend(ls.A, rankM, d, ls.cart))
-        end
-        push!(req, MPI.Irecv!(bufM, rankM, d+D, ls.cart))
+        sz = size(A, d + 1)
+        (sz - 2 * nw + 1) : (sz - nw)
     end
 
-    # plus side
-    if rankP == myrank
-        copy!(_ghost_view(ls.A, ls.nw, d, :plus),
-              _face_view(ls.A,  ls.nw, d, :plus))
+    # (2) build an indexing tuple, replacing only index d+1
+    idx = ntuple(i -> i == d + 1 ? face_rng : Colon(), ndims(A))
+    @views return A[idx...]            # a view, no copy
+end
+
+"""
+    _ghost(A, nw, d, side)
+
+Return a `@view` of the *internal* ghost layer (width `nw`) for
+dimension `d` on the requested `side`.
+"""
+function _ghost(A, nw, d, side::Symbol)
+    ghost_rng = if side === :minus
+        1 : nw
+    else
+        sz = size(A, d + 1)
+        (sz - nw + 1) : sz
+    end
+
+    idx = ntuple(i -> i == d + 1 ? ghost_rng : Colon(), ndims(A))
+    @views return A[idx...]
+end
+@inline _mul_phase!(buf, ϕ) = JACC.parallel_for(length(buf)) do i; buf[i]*=ϕ; end
+
+##############################################################################
+# exchange_dim!  –  no-derived-datatype version that never aliases buffers
+#                   (works with MPI.jl v0.20.x)
+#
+#  * four contiguous buffers per spatial dimension:
+#        bufSM (send minus), bufRM (recv minus),
+#        bufSP (send plus) , bufRP (recv plus)
+#  * send-buffers are filled with `_face`, optionally phase-multiplied,
+#    then passed to MPI.Isend
+#  * recv-buffers are passed to MPI.Irecv!  and finally copied into `_ghost`
+##############################################################################
+function exchange_dim!(ls::Lattice{D}, d::Int) where D
+    # buffer indices
+    iSM, iRM = 4d - 3, 4d - 2
+    iSP, iRP = 4d - 1, 4d
+
+    bufSM, bufRM = ls.buf[iSM], ls.buf[iRM]      # minus side: send / recv
+    bufSP, bufRP = ls.buf[iSP], ls.buf[iRP]      # plus  side: send / recv
+
+    rankM, rankP = ls.nbr[d]                     # neighbour ranks
+    me           = ls.myrank
+    reqs         = MPI.Request[]
+
+    baseT = MPI.Datatype(eltype(ls.A))           # elementary datatype
+    #println("M ",rankM,"\t $me")
+    MPI.Barrier(ls.cart)
+    #println("P ", rankP,"\t $me")
+    # ---------------- minus direction -------------------
+    if rankM == me
+        copy!(_ghost(ls.A, ls.nw, d, :minus),
+              _face( ls.A, ls.nw, d, :minus))
+        if ls.coords[d] == 0                     # wrap ⇒ phase
+            _mul_phase!(_ghost(ls.A, ls.nw, d, :minus), ls.phases[d])
+        end
+    else
+        copy!(bufSM, _face(ls.A, ls.nw, d, :minus))
+        if ls.coords[d] == 0; _mul_phase!(bufSM, ls.phases[d]); end
+
+        cnt = length(bufSM)
+        
+        push!(reqs, MPI.Isend(bufSM, rankM, d,    ls.cart))#;
+                              #count=cnt, datatype=baseT))
+        
+        push!(reqs, MPI.Irecv!(bufRM,  rankM, d+D, ls.cart))#;
+                               #count=cnt, datatype=baseT))
+    end
+
+    # ---------------- plus direction --------------------
+    if rankP == me
+        copy!(_ghost(ls.A, ls.nw, d, :plus),
+              _face( ls.A, ls.nw, d, :plus))
         if ls.coords[d] == ls.dims[d]-1
-            _mul_phase!(_ghost_view(ls.A, ls.nw, d, :plus), ls.phases[d])
+            _mul_phase!(_ghost(ls.A, ls.nw, d, :plus), ls.phases[d])
         end
     else
-        wrap = (ls.coords[d]==ls.dims[d]-1)
-        if wrap
-            copy!(bufP, _face_view(ls.A, ls.nw, d, :plus))
-            _mul_phase!(bufP, ls.phases[d])
-            push!(req, MPI.Isend(bufP, rankP, d+D, ls.cart))
-        else
-            push!(req, MPI.Isend(ls.A, rankP, d+D, ls.cart))
-        end
-        push!(req, MPI.Irecv!(bufP, rankP, d, ls.cart))
+        copy!(bufSP, _face(ls.A, ls.nw, d, :plus))
+        if ls.coords[d] == ls.dims[d]-1; _mul_phase!(bufSP, ls.phases[d]); end
+
+        cnt = length(bufSP)
+        
+        push!(reqs, MPI.Isend(bufSP, rankP, d+D, ls.cart))#;
+                              #count=cnt, datatype=baseT))
+        push!(reqs, MPI.Irecv!(bufRP,  rankP, d,   ls.cart));
+                               #count=cnt, datatype=baseT))
     end
 
-    compute_interior!(ls)        # overlap compute
-    MPI.Waitall!(req)
+    # -------- overlap bulk computation -----------------
+    compute_interior!(ls)
+    isempty(reqs) || MPI.Waitall!(reqs)
 
-    if rankM != myrank
-        copy!(_ghost_view(ls.A, ls.nw, d, :minus), bufM)
+    # -------- copy received data into ghosts -----------
+    if rankM != me
+        copy!(_ghost(ls.A, ls.nw, d, :minus), bufRM)
     end
-    if rankP != myrank
-        copy!(_ghost_view(ls.A, ls.nw, d, :plus),  bufP)
+    if rankP != me
+        copy!(_ghost(ls.A, ls.nw, d, :plus ), bufRP)
     end
 end
 
 # ---------------------------------------------------------------------------
-# --------------- user-replaceable compute kernels ---------------------------
+# hooks (user overrides)
 # ---------------------------------------------------------------------------
-compute_interior!(ls::Lattice) = nothing      # stencil for inner region
-compute_boundary!(ls::Lattice) = nothing      # stencil for ghost region
-
-
+compute_interior!(ls::Lattice) = nothing
+compute_boundary!(ls::Lattice) = nothing
 
 export Lattice
