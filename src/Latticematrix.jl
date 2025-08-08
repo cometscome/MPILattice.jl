@@ -66,6 +66,7 @@ function LatticeMatrix(NC1, NC2, dim, gsize, PEs; nw=1, elementtype=ComplexF64, 
 
 
     PN = ntuple(i -> gsize[i] ÷ dims[i], D)
+    #println("LatticeMatrix: $dims, $gsize, $PN, $nw")
 
     return LatticeMatrix{D,T,typeof(A),NC1,NC2}(nw, phases, NC1, NC2, gsize,
         cart, Tuple(coords), dims, nbr,
@@ -96,6 +97,17 @@ function LatticeMatrix(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD
     idx_global = ntuple(i -> (i == 1 || i == 2) ? Colon() : get_globalrange(ls, i - 2), dim .+ 2)
 
     #println(idx)
+    #=
+    for i = 1:MPI.Comm_size(ls.cart)
+        if ls.myrank == i
+            println(get_globalrange(ls, 1))
+        end
+        MPI.Barrier(ls.cart)
+    end
+    =#
+
+
+
     #println(idx_global)
     Acpu[idx...] = A[idx_global...]
     #println(Acpu)
@@ -118,7 +130,10 @@ end
 function get_globalrange(ls::LatticeMatrix{D,T,TA}, dim) where {D,T,TA}
     coords_r = MPI.Cart_coords(ls.cart, ls.myrank)
     istart = get_globalindex(ls, 1, dim, coords_r[dim])
-    iend = get_globalindex(ls, ls.PN[dim], D, coords_r[dim])
+    #if dim == 1
+    #    println(" $( ls.PN[dim])")
+    # end
+    iend = get_globalindex(ls, ls.PN[dim], dim, coords_r[dim])
     return istart:iend
 end
 

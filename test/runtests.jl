@@ -65,11 +65,15 @@ function latticetest2D()
     nw = 1
 
     nprocs = MPI.Comm_size(MPI.COMM_WORLD)
-    n1 = nprocs ÷ 2
-    if n1 == 0
-        n1 = 1
+    if length(ARGS) == 0
+        n1 = nprocs ÷ 2
+        if n1 == 0
+            n1 = 1
+        end
+        PEs = (n1, nprocs ÷ n1)
+    else
+        PEs = Tuple(parse.(Int64, ARGS))
     end
-    PEs = (n1, nprocs ÷ n1)
     M1 = LatticeMatrix(NC, NC, dim, gsize, PEs; nw)
     comm = M1.cart
 

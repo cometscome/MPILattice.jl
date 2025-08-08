@@ -115,7 +115,7 @@ end
 function get_globalrange(ls::Lattice{D,T,TA}, dim) where {D,T,TA}
     coords_r = MPI.Cart_coords(ls.cart, ls.myrank)
     istart = get_globalindex(ls, 1, dim, coords_r[dim])
-    iend = get_globalindex(ls, ls.PN[dim], D, coords_r[dim])
+    iend = get_globalindex(ls, ls.PN[dim], dim, coords_r[dim])
     return istart:iend
 end
 
