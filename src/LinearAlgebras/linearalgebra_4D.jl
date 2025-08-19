@@ -230,6 +230,8 @@ function kernel_4Dsubstitute_shift!(i, C, A, NC1, NC2, nw, PN, shift)
     iyp = iy + shift[2]
     izp = iz + shift[3]
     itp = it + shift[4]
+    #println("ix, iy, iz, it = ", (ix, iy, iz, it))
+    #println("ix, iy, iz, it = ", (ixp, iyp, izp, itp))
     for jc = 1:NC2
         for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = A[ic, jc, ixp+nw, iyp+nw, izp+nw, itp+nw]
@@ -620,3 +622,4 @@ function kernel_4Dmatrix_mul_shiftAdagshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, 
         end
     end
 end
+

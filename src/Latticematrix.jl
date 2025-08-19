@@ -32,6 +32,7 @@ struct LatticeMatrix{D,T,AT,NC1,NC2} <: Lattice{D,T,AT}
     buf::Vector{AT}                   # 2D work buffers (minus/plus)
     myrank::Int
     PN::NTuple{D,Int}
+    comm::MPI.Comm
 end
 
 
@@ -73,7 +74,7 @@ function LatticeMatrix(NC1, NC2, dim, gsize, PEs; nw=1, elementtype=ComplexF64, 
 
     return LatticeMatrix{D,T,typeof(A),NC1,NC2}(nw, phases, NC1, NC2, gsize,
         cart, Tuple(coords), dims, nbr,
-        A, buf, MPI.Comm_rank(cart), PN)
+        A, buf, MPI.Comm_rank(cart), PN, comm0)
 end
 
 function LatticeMatrix(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD)
@@ -129,6 +130,10 @@ function LatticeMatrix(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD
     # 0-based coords
     #println(coords_r)
 
+end
+
+function Base.similar(ls::LatticeMatrix{D,T,AT,NC1,NC2}) where {D,T,AT,NC1,NC2}
+    return LatticeMatrix(NC1, NC2, D, ls.gsize, ls.dims; nw=ls.nw, elementtype=T, phases=ls.phases, comm0=ls.comm)
 end
 
 function Base.display(ls::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}

@@ -38,19 +38,103 @@ function exptest(NC)
     A = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
     M2 = LatticeMatrix(A, dim, PEs; nw)
 
+    M5 = similar(M2)
+
+    #shift = (3, 1, -1, -2)
+    shift = (0, 0, 0, -2)
+    M4 = Shifted_Lattice(M2, shift)
+    substitute!(M5, M4)
+    ix, iy, iz, it = 1, 1, 1, 1
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+    ixp = ifelse(ixp < 1, ixp + NX, ixp)
+    iyp = ifelse(iyp < 1, iyp + NY, iyp)
+    izp = ifelse(izp < 1, izp + NZ, izp)
+    itp = ifelse(itp < 1, itp + NT, itp)
+    ixp = ifelse(ixp > NX, ixp - NX, ixp)
+    iyp = ifelse(iyp > NY, iyp - NY, iyp)
+    izp = ifelse(izp > NZ, izp - NZ, izp)
+    itp = ifelse(itp > NT, itp - NT, itp)
+
+    display(A[:, :, ixp, iyp, izp, itp])
+    display(M5.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+    return
+
+
     A3 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
     M3 = LatticeMatrix(A3, dim, PEs; nw)
 
     A1 = zeros(ComplexF64, NC, NC, NX, NY, NZ, NT)
 
-
+    println("AdagB")
     M2t = M2'
     mul!(M1, M2t, M3)
     display(M1.A[:, :, 2, 2, 2, 2])
     display(A[:, :, 1, 1, 1, 1]' * A3[:, :, 1, 1, 1, 1])
 
+
+    M2t = M2'
+    M3t = M3'
+    println("ABdag")
+    mul!(M1, M2, M3t)
+    display(M1.A[:, :, 2, 2, 2, 2])
+    display(A[:, :, 1, 1, 1, 1] * A3[:, :, 1, 1, 1, 1]')
+
+    println("AdagBdag")
+    mul!(M1, M2t, M3t)
+    display(M1.A[:, :, 2, 2, 2, 2])
+    display(A[:, :, 1, 1, 1, 1]' * A3[:, :, 1, 1, 1, 1]')
+
     #mul!(A1, A', A3)
     #println(sum(A1))
+
+    println("substitute test")
+    @testset "substitute test" begin
+        display(M2.A[:, :, 3, 2, 2, 2])
+        substitute!(M1, M2)
+        display(M1.A[:, :, 3, 2, 2, 2])
+        @test M2.A ≈ M1.A atol = 1e-6
+
+        shift = (1, 0, 0, 0)
+        M3 = Shifted_Lattice(M2, shift)
+        substitute!(M1, M3)
+        display(M1.A[:, :, 2, 2, 2, 2])
+    end
+
+    println("mul test")
+    @testset "mul test" begin
+        A2 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+        M2 = LatticeMatrix(A2, dim, PEs; nw)
+
+        A3 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+        M3 = LatticeMatrix(A3, dim, PEs; nw)
+
+        mul!(M1, M2', M3)
+        #println("MPILattice")
+        a = M1.A[:, :, 2, 2, 2, 2]
+        #display(a)
+        #display(M1.A[:, :, 2, 2, 2, 2])
+        #println("original")
+        ao = A2[:, :, 1, 1, 1, 1]' * A3[:, :, 1, 1, 1, 1]
+        #display(ao)
+        @test a ≈ ao atol = 1e-6
+        #display(A2[:, :, 1, 1, 1, 1]' * A3[:, :, 1, 1, 1, 1])
+        shift = (1, 0, 0, 0)
+        M4 = Shifted_Lattice(M3, shift)
+        mul!(M1, M2', M4')
+        #println("MPILattice")
+        a = M1.A[:, :, 2, 2, 2, 2]
+        #display(M1.A[:, :, 2, 2, 2, 2])
+        #display(a)
+        #println("original")
+        ao = A2[:, :, 1, 1, 1, 1]' * A3[:, :, 2, 1, 1, 1]'
+        @test a ≈ ao atol = 1e-6
+        #display(ao)
+        #display(A2[:, :, 1, 1, 1, 1]' * A3[:, :, 2, 1, 1, 1]')
+    end
+
     return
 
 
