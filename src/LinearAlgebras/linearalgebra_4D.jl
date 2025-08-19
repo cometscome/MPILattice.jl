@@ -63,7 +63,7 @@ function expt!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::LatticeMatrix{4,T1,AT1,NC1,N
         )
     else
         JACC.parallel_for(
-            prod(C.PN), kernel_4Dexpt!, C.A, A.A, C.PN, t
+            prod(C.PN), kernel_4Dexpt!, C.A, A.A, C.PN, t, Val(NC1)
         )
     end
     set_halo!(C)
@@ -71,21 +71,47 @@ end
 
 function kernel_4Dexpt_NC3!(i, C, A, PN, t)
     ix, iy, iz, it = get_4Dindex(i, PN)
-    C[:, :, ix, iy, iz, it] = exp3x3(A[:, :, ix, iy, iz, it], t)
+    a11 = A[1,1,ix, iy, iz, it]
+    a12 = A[1,2,ix, iy, iz, it] 
+    a13 = A[1,3,ix, iy, iz, it] 
+    a21 = A[2,1,ix, iy, iz, it] 
+    a22 = A[2,2,ix, iy, iz, it] 
+    a23 = A[2,3,ix, iy, iz, it] 
+    a31 = A[3,1,ix, iy, iz, it] 
+    a32 = A[3,2,ix, iy, iz, it] 
+    a33 = A[3,3,ix, iy, iz, it] 
+
+    c11,c12,c13,c21,c22,c23,c31,c32,c33= exp3x3_pade(a11, a12, a13, a21, a22, a23, a31, a32, a33, t)
+    C[1,1,ix, iy, iz, it] = c11
+    C[1,2,ix, iy, iz, it] = c12
+    C[1,3,ix, iy, iz, it] = c13
+    C[2,1,ix, iy, iz, it] = c21
+    C[2,2,ix, iy, iz, it] = c22
+    C[2,3,ix, iy, iz, it] = c23
+    C[3,1,ix, iy, iz, it] = c31
+    C[3,2,ix, iy, iz, it] = c32
+    C[3,3,ix, iy, iz, it] = c33
+
 end
 
 function kernel_4Dexpt_NC2!(i, C, A, PN, t)
     ix, iy, iz, it = get_4Dindex(i, PN)
-    c = exp2x2(view(A, :, :, ix, iy, iz, it), t)
-    C[1, 1, ix, iy, iz, it] = c[1, 1]
-    C[1, 2, ix, iy, iz, it] = c[1, 2]
-    C[2, 1, ix, iy, iz, it] = c[2, 1]
-    C[2, 2, ix, iy, iz, it] = c[2, 2]
+    a11 = A[1,1,ix, iy, iz, it ]
+    a21 = A[2,1,ix, iy, iz, it ]
+    a12 = A[1,2,ix, iy, iz, it ]
+    a22 = A[2,2,ix, iy, iz, it ]
+    c11,c12,c21,c22 = exp2x2_elem(a11,a12,a21,a22, t) 
+
+    C[1, 1, ix, iy, iz, it] = c11
+    C[1, 2, ix, iy, iz, it] = c12
+    C[2, 1, ix, iy, iz, it] = c21
+    C[2, 2, ix, iy, iz, it] = c22
 end
 
-function kernel_4Dexpt!(i, C, A, PN, t)
+function kernel_4Dexpt!(i, C, A, PN, t,::Val{N}) where {N}
     ix, iy, iz, it = get_4Dindex(i, PN)
-    C[:, :, ix, iy, iz, it] = expm_pade13(A[:, :, ix, iy, iz, it], t)
+    expm_pade13_writeback!(C, A, ix, iy, iz, it, t, Val(N))
+    #C[:, :, ix, iy, iz, it] = expm_pade13(A[:, :, ix, iy, iz, it], t)
 end
 
 

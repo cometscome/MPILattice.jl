@@ -1,8 +1,8 @@
-struct SULattice{D,T,AT,N} <: Lattice{D,T,AT}
+struct TALattice{D,T,AT,N} <: Lattice{D,T,AT}
     lt::LatticeMatrix{D,T,AT,N,N}
 
-    function SULattice(A::LatticeMatrix{D,T,AT,N,N2}) where {D,T,AT,N,N2}
-        @assert N == N2 "The number of columns must match the number of rows for a special unitary lattice."
+    function TALattice(A::LatticeMatrix{D,T,AT,N,N2}) where {D,T,AT,N,N2}
+        @assert N == N2 "The number of columns must match the number of rows."
         su = new{D,T,AT,N}(A)
         traceless_antihermitian!(su)
         return su
@@ -10,7 +10,7 @@ struct SULattice{D,T,AT,N} <: Lattice{D,T,AT}
 end
 
 
-export SULattice
+export TALattice
 
 const tinyvalue = 1e-100
 const pi23 = 2pi / 3
@@ -22,7 +22,7 @@ const sr3ih = 0.5 * sr3i
 const sqr3inv = sr3i
 const sr3i2 = 2 * sr3i
 
-function traceless_antihermitian!(A::SULattice{4,T,AT,N}) where {T,AT,N}
+function traceless_antihermitian!(A::TALattice{4,T,AT,N}) where {T,AT,N}
     if N == 3
         JACC.parallel_for(
             prod(A.lt.PN), kernel_traceless_antihermitian_4DNC3!, A.lt.A, A.lt.nw, A.lt.PN)
@@ -142,7 +142,7 @@ function kernel_traceless_antihermitian_4D!(i, v, N, nw, PN)
 end
 
 
-function expt!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::SULattice{4,T1,AT1,NC1}, t::S=one(S)) where {T,AT,NC1,NC2,S<:Number,T1,AT1}
+function expt!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::TALattice{4,T1,AT1,NC1}, t::S=one(S)) where {T,AT,NC1,NC2,S<:Number,T1,AT1}
     @assert NC1 == NC2 "Matrix exponentiation requires square matrices, but got $(NC1) x $(NC2)."
     if NC1 == 3
         JACC.parallel_for(
@@ -154,7 +154,7 @@ function expt!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::SULattice{4,T1,AT1,NC1}, t::
         )
     else
         JACC.parallel_for(
-            prod(C.PN), kernel_4Dexpt!, C.A, A.lt.A, C.PN, t
+            prod(C.PN), kernel_4Dexpt!, C.A, A.lt.A, C.PN, t, Val(NC1)
         )
     end
     set_halo!(C)
@@ -195,9 +195,16 @@ function kernel_4Dexpt_SU3!(i, C, A, PN, t)
     csum = c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8
     if csum == 0
         c = Mat3{eltype(C)}(one(eltype(C)))
-        C[:, :, ix, iy, iz, it] = T[c.a11 c.a12 c.a13;
-            c.a21 c.a22 c.a23;
-            c.a31 c.a32 c.a33]
+        C[1,1,ix, iy, iz, it] = c.a11
+        C[1,2,ix, iy, iz, it] = c.a12
+        C[1,3,ix, iy, iz, it] = c.a13
+        C[2,1,ix, iy, iz, it] = c.a21
+        C[2,2,ix, iy, iz, it] = c.a22
+        C[2,3,ix, iy, iz, it] = c.a23
+        C[3,1,ix, iy, iz, it] = c.a31
+        C[3,2,ix, iy, iz, it] = c.a32
+        C[3,3,ix, iy, iz, it] = c.a33
+
     end
 
 
@@ -353,9 +360,20 @@ function kernel_4Dexpt_SU3!(i, C, A, PN, t)
         ww15 + im * ww16,
         ww17 + im * ww18)
     c = mul3(conjugate3(w), ww)
-    C[:, :, ix, iy, iz, it] = T[c.a11 c.a12 c.a13;
-        c.a21 c.a22 c.a23;
-        c.a31 c.a32 c.a33]
+    #C[:, :, ix, iy, iz, it] = T[c.a11 c.a12 c.a13;
+    #    c.a21 c.a22 c.a23;
+    #    c.a31 c.a32 c.a33]
+
+    C[1,1,ix, iy, iz, it] = c.a11
+    C[1,2,ix, iy, iz, it] = c.a12
+    C[1,3,ix, iy, iz, it] = c.a13
+    C[2,1,ix, iy, iz, it] = c.a21
+    C[2,2,ix, iy, iz, it] = c.a22
+    C[2,3,ix, iy, iz, it] = c.a23
+    C[3,1,ix, iy, iz, it] = c.a31
+    C[3,2,ix, iy, iz, it] = c.a32
+    C[3,3,ix, iy, iz, it] = c.a33   
+
     #=
     w[1, 1, ix, iy, iz, it] = w1 + im * w2
     w[1, 2, ix, iy, iz, it] = w3 + im * w4

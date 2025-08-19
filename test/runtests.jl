@@ -140,7 +140,7 @@ function exptest(NC)
     M1 = LatticeMatrix(NC, NC, dim, gsize, PEs; nw)
     comm = M1.cart
 
-    A = rand(NC, NC, NX, NY, NZ, NT)
+    A = rand(ComplexF64,NC, NC, NX, NY, NZ, NT)
     M2 = LatticeMatrix(A, dim, PEs; nw)
 
     t = 0.3
@@ -184,7 +184,7 @@ function exptest(NC)
     a = exp(t * v[:, :, 1, 1, 1, 1])
     display(a)
 
-    sm = SULattice(M2)
+    sm = TALattice(M2)
     expt!(M1, sm, t)
     display(M1.A[:, :, 2, 2, 2, 2])
 
@@ -241,7 +241,7 @@ function latticetest4D()
     return
 
     println("SM2")
-    SM2 = SULattice(M2)
+    SM2 = TALattice(M2)
     return
 
     A3 = rand(NC, NC, NX, NY, NZ, NT)
