@@ -143,6 +143,11 @@ function exptest(NC)
     A = rand(ComplexF64,NC, NC, NX, NY, NZ, NT)
     M2 = LatticeMatrix(A, dim, PEs; nw)
 
+    M2t = M2'
+    return
+
+
+
     t = 0.3
     expt!(M1, M2, t)
     display(M1.A[:, :, 2, 2, 2, 2])

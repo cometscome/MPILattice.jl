@@ -26,6 +26,14 @@ end
 
 export Shifted_Lattice
 
+struct Adjoint_Lattice{D}
+    data::D
+end
+
+function Base.adjoint(data::Lattice{D,T,AT}) where {D,T,AT}
+    return Adjoint_Lattice{Lattice{D,T,AT}}(data)
+end
+
 
 
 end
