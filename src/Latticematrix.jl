@@ -34,6 +34,8 @@ struct LatticeMatrix{D,T,AT,NC1,NC2} <: Lattice{D,T,AT}
     PN::NTuple{D,Int}
 end
 
+
+
 # ---------------------------------------------------------------------------
 # constructor + heavy init (still cheap to call)
 # ---------------------------------------------------------------------------
