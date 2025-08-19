@@ -113,7 +113,7 @@ function latticetest2D()
     end
 
 end
-
+using Random
 function latticetest4D()
     MPI.Init()
     NC = 1
@@ -125,6 +125,7 @@ function latticetest4D()
     gsize = (NX, NY, NZ, NT)
     #gsize = (NX, NY)
     nw = 1
+    Random.seed!(1234)
 
     nprocs = MPI.Comm_size(MPI.COMM_WORLD)
     if length(ARGS) == 0
@@ -145,11 +146,15 @@ function latticetest4D()
     A3 = rand(NC, NC, NX, NY, NZ, NT)
     M3 = LatticeMatrix(A3, dim, PEs; nw)
     mul!(M1, M2, M3)
+    println(allsum(M1))
+    println(allsum(M2))
+    println(sum(A))
+    #display(M1)
 
-    return
+    #return
     shift = (1, 0, 0, 0)
     M3 = Shifted_Lattice(M2, shift)
-
+    return
 
     if M2.myrank == 0
         display(A[:, :, NX, NY, NZ, NT])

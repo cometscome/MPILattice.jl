@@ -129,6 +129,47 @@ function LatticeMatrix(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD
 
 end
 
+function Base.display(ls::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
+
+    NN = size(ls.A)
+    for rank = 0:MPI.Comm_size(ls.cart)-1
+        if ls.myrank == rank
+            println("LatticeMatrix (rank $rank):")
+            indices = map(d -> get_globalrange(ls, d), 1:4)
+            println("Global indices: ", indices)
+            #println(ls.nw+1:NN[4]-ls.nw)
+            for it in 1:ls.PN[4]
+                for iz in 1:ls.PN[3]
+                    for iy in 1:ls.PN[2]
+                        for ix in 1:ls.PN[1]
+                            println((indices[1][ix], indices[2][iy], indices[3][iz], indices[4][it]))
+                            display(ls.A[:, :, ls.nw+ix, ls.nw+iy, ls.nw+iz, ls.nw+it])
+                            #print("$(ls.A[:, :, ix, iy, iz, it]) ")
+                        end
+                    end
+                end
+            end
+            #display(ls.A[:, :, ls.nw+1:end-ls.nw, ls.nw+1:end-ls.nw, ls.nw+1:end-ls.nw, ls.nw+1:end-ls.nw])
+        end
+        MPI.Barrier(ls.cart)
+    end
+end
+
+
+
+function allsum(ls::LatticeMatrix{D,T,AT,NC1,NC2}) where {D,T,AT,NC1,NC2}
+    NN = ls.PN
+    indices = ntuple(i -> (i == 1 || i == 2) ? Colon() : (ls.nw+1):(ls.nw+NN[i-2]), D + 2)
+    # sum all elements in the local array
+    local_sum = sum(ls.A[indices...])
+    #local_sum = sum(ls.A[:, :, ls.nw+1:ls.nw+NN[1], ls.nw+1:ls.nw+NN[2], ls.nw+1:ls.nw+NN[3], ls.nw+1:ls.nw+NN[4]])
+    # reduce to all processes
+    global_sum = MPI.Reduce(local_sum, MPI.SUM, 0, ls.cart)
+    return global_sum
+end
+
+export allsum
+
 function get_globalrange(ls::LatticeMatrix{D,T,TA}, dim) where {D,T,TA}
     coords_r = MPI.Cart_coords(ls.cart, ls.myrank)
     istart = get_globalindex(ls, 1, dim, coords_r[dim])
