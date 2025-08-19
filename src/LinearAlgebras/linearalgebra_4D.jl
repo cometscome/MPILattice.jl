@@ -76,7 +76,11 @@ end
 
 function kernel_4Dexpt_NC2!(i, C, A, PN, t)
     ix, iy, iz, it = get_4Dindex(i, PN)
-    C[:, :, ix, iy, iz, it] = exp2x2(A[:, :, ix, iy, iz, it], t)
+    c = exp2x2(view(A, :, :, ix, iy, iz, it), t)
+    C[1, 1, ix, iy, iz, it] = c[1, 1]
+    C[1, 2, ix, iy, iz, it] = c[1, 2]
+    C[2, 1, ix, iy, iz, it] = c[2, 1]
+    C[2, 2, ix, iy, iz, it] = c[2, 2]
 end
 
 function kernel_4Dexpt!(i, C, A, PN, t)
