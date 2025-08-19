@@ -9,6 +9,7 @@ abstract type Lattice{D,T,AT} end
 include("Lattice.jl")
 include("Latticematrix.jl")
 include("LinearAlgebras/linearalgebra.jl")
+include("SpecialUnitary/SU.jl")
 
 
 #include("HaloComm.jl")
@@ -24,5 +25,7 @@ function Shifted_Lattice(data::Lattice{D,T,AT}, shift) where {D,T,AT}
 end
 
 export Shifted_Lattice
+
+
 
 end

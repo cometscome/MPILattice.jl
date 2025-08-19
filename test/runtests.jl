@@ -114,9 +114,9 @@ function latticetest2D()
 
 end
 using Random
-function latticetest4D()
-    MPI.Init()
-    NC = 1
+
+
+function exptest(NC)
     dim = 4
     NX = 8
     NY = 8
@@ -125,7 +125,7 @@ function latticetest4D()
     gsize = (NX, NY, NZ, NT)
     #gsize = (NX, NY)
     nw = 1
-    Random.seed!(1234)
+
 
     nprocs = MPI.Comm_size(MPI.COMM_WORLD)
     if length(ARGS) == 0
@@ -142,6 +142,107 @@ function latticetest4D()
 
     A = rand(NC, NC, NX, NY, NZ, NT)
     M2 = LatticeMatrix(A, dim, PEs; nw)
+
+    t = 0.3
+    expt!(M1, M2, t)
+    display(M1.A[:, :, 2, 2, 2, 2])
+    a = exp(t * A[:, :, 1, 1, 1, 1])
+    display(a)
+
+    A = rand(NC, NC, NX, NY, NZ, NT)
+    v = deepcopy(A)
+    ix, iy, iz, it = 1, 1, 1, 1
+    fac1N = 1 / NC
+    tri = 0.0
+    for k = 1:NC
+        tri += imag(v[k, k, ix, iy, iz, it])
+    end
+    tri *= fac1N
+    for k = 1:NC
+        v[k, k, ix, iy, iz, it] =
+            (imag(v[k, k, ix, iy, iz, it]) - tri) * im
+    end
+
+
+    for k1 = 1:NC
+        for k2 = k1+1:NC
+            vv =
+                0.5 * (
+                    v[k1, k2, ix, iy, iz, it] -
+                    conj(v[k2, k1, ix, iy, iz, it])
+                )
+            v[k1, k2, ix, iy, iz, it] = vv
+            v[k2, k1, ix, iy, iz, it] = -conj(vv)
+        end
+    end
+
+    println("Traceless antihermitian matrix:")
+
+    M2 = LatticeMatrix(v, dim, PEs; nw)
+    expt!(M1, M2, t)
+    display(M1.A[:, :, 2, 2, 2, 2])
+    a = exp(t * v[:, :, 1, 1, 1, 1])
+    display(a)
+
+    sm = SULattice(M2)
+    expt!(M1, sm, t)
+    display(M1.A[:, :, 2, 2, 2, 2])
+
+
+end
+function latticetest4D()
+    MPI.Init()
+
+    Random.seed!(1234)
+    a0 = rand(3, 3)
+    a = Mat3{Complex{Float64}}(a0[:]...)
+    t = 0.4
+    b = exp3x3_pade(a, t)
+
+    b0 = Matrix(b)
+    display(b0)
+    display(exp(t * a0))
+
+    B = expm_pade13(a0, t)
+    display(B)
+
+    @testset "Matrix exponential" begin
+        for NC = 2:4
+            @testset "NC = $NC" begin
+                for i = 1:10
+                    a0 = rand(NC, NC)
+                    t = rand()
+                    #println("i = $i, NC = $NC, t = $t")
+                    #@time expt(a0, t)
+                    #@time exp(t * a0)
+                    c1 = expt(a0, t)
+                    c2 = exp(t * a0)
+                    @test c1 ≈ c2 atol = 1e-6
+                    #display(expt(a0, t))
+                    #display(exp(t * a0))
+                end
+                a0 = rand(NC, NC)
+                t = rand()
+                println("NC = $NC")
+                println("original")
+                display(expt(a0, t))
+                println("Base")
+                display(exp(t * a0))
+            end
+        end
+    end
+
+    NC = 3
+    for NC = 2:4
+        exptest(NC)
+    end
+
+
+    return
+
+    println("SM2")
+    SM2 = SULattice(M2)
+    return
 
     A3 = rand(NC, NC, NX, NY, NZ, NT)
     M3 = LatticeMatrix(A3, dim, PEs; nw)
