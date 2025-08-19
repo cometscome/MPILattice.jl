@@ -6,10 +6,6 @@ using JACC
 
 abstract type Lattice{D,T,AT} end
 
-include("Lattice.jl")
-include("Latticematrix.jl")
-include("LinearAlgebras/linearalgebra.jl")
-include("TA/TA.jl")
 
 
 #include("HaloComm.jl")
@@ -31,8 +27,13 @@ struct Adjoint_Lattice{D}
 end
 
 function Base.adjoint(data::Lattice{D,T,AT}) where {D,T,AT}
-    return Adjoint_Lattice{Lattice{D,T,AT}}(data)
+    return Adjoint_Lattice{typeof(data)}(data)
 end
+
+include("Lattice.jl")
+include("Latticematrix.jl")
+include("LinearAlgebras/linearalgebra.jl")
+include("TA/TA.jl")
 
 
 

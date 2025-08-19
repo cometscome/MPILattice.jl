@@ -50,7 +50,7 @@ function LatticeMatrix(NC1, NC2, dim, gsize, PEs; nw=1, elementtype=ComplexF64, 
     #coords= MPI.Cart_coords(cart, MPI.Comm_rank(cart))
     nbr = ntuple(d -> ntuple(s -> MPI.Cart_shift(cart, d - 1, ifelse(s == 1, -1, 1))[2], 2), D)
     # local array (NC first)
-    println(gsize)
+    #println(gsize)
     locS = ntuple(i -> gsize[i] ÷ dims[i] + 2nw, D)
     loc = (NC1, NC2, locS...)
     A = JACC.zeros(T, loc...)
