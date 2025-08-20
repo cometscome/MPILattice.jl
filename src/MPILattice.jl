@@ -3,9 +3,9 @@ using MPI
 using LinearAlgebra
 using JACC
 
+include("utilities/randomgenerator.jl")
 
 abstract type Lattice{D,T,AT} end
-
 
 
 #include("HaloComm.jl")
