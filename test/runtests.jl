@@ -8,7 +8,72 @@ JACC.@init_backend
 using MPI, JACC, StaticArrays
 
 
+
 using Random
+
+function normalizetest()
+    MPI.Init()
+
+    Random.seed!(1234)
+
+    for NC = 2:4
+        @testset "NC = $NC" begin
+            normalizetest(NC)
+        end
+    end
+end
+
+function normalizetest(NC)
+    dim = 4
+    NX = 8
+    NY = 8
+    NZ = 8
+    NT = 8
+    gsize = (NX, NY, NZ, NT)
+    #gsize = (NX, NY)
+    nw = 1
+
+
+    nprocs = MPI.Comm_size(MPI.COMM_WORLD)
+    if length(ARGS) == 0
+        n1 = nprocs ÷ 2
+        if n1 == 0
+            n1 = 1
+        end
+        PEs = (n1, nprocs ÷ n1, 1, 1)
+    else
+        PEs = Tuple(parse.(Int64, ARGS))
+    end
+    M1 = LatticeMatrix(NC, NC, dim, gsize, PEs; nw)
+    comm = M1.cart
+
+    A = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+    M2 = LatticeMatrix(A, dim, PEs; nw)
+
+    M5 = similar(M2)
+
+    #shift = (3, 1, -1, -2)
+    shift = (0, 0, 0, -2)
+    M4 = Shifted_Lattice(M2, shift)
+    substitute!(M5, M4)
+    ix, iy, iz, it = 1, 1, 1, 1
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+    ixp = ifelse(ixp < 1, ixp + NX, ixp)
+    iyp = ifelse(iyp < 1, iyp + NY, iyp)
+    izp = ifelse(izp < 1, izp + NZ, izp)
+    itp = ifelse(itp < 1, itp + NT, itp)
+    ixp = ifelse(ixp > NX, ixp - NX, ixp)
+    iyp = ifelse(iyp > NY, iyp - NY, iyp)
+    izp = ifelse(izp > NZ, izp - NZ, izp)
+    itp = ifelse(itp > NT, itp - NT, itp)
+
+
+    normalize_matrix!(M2)
+    display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it] * M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it]')
+end
 
 
 function exptest(NC)
@@ -60,6 +125,16 @@ function exptest(NC)
 
     display(A[:, :, ixp, iyp, izp, itp])
     display(M5.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+
+    A5 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+    M5 = LatticeMatrix(A5, dim, PEs; nw)
+
+    dA5n = zero(A5)
+
+
+    dM5 = similar(M5)
+    println(tr(M5))
+
     return
 
 
@@ -267,8 +342,13 @@ end
 
 
 @testset "MPILattice.jl" begin
+
+
     # Write your tests here.
 
-    latticetest4D()
+    #latticetest4D()
+
+    normalizetest()
+
 
 end

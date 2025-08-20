@@ -52,6 +52,8 @@ function kernel_4Dmatrix_mul!(i, C, A, B, NC1, NC2, NC3, nw, PN)
     end
 end
 
+
+
 function expt!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::LatticeMatrix{4,T1,AT1,NC1,NC2}, t::S=one(S)) where {T,AT,NC1,NC2,S<:Number,T1,AT1}
     @assert NC1 == NC2 "Matrix exponentiation requires square matrices, but got $(NC1) x $(NC2)."
     if NC1 == 3
@@ -623,3 +625,194 @@ function kernel_4Dmatrix_mul_shiftAdagshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, 
     end
 end
 
+function LinearAlgebra.tr(C::LatticeMatrix{4,T1,AT1,NC1,NC2}) where {T1,AT1,NC1,NC2}
+    @assert NC1 == NC2 "Trace is only defined for square matrices"
+    s = JACC.parallel_reduce(prod(C.PN), +, kernel_tr_4D, C.A, NC1, C.PN; init=zero(eltype(C.A)))
+end
+
+function kernel_tr_4D(i, A, NC1, PN)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    s = zero(eltype(A))
+    for ic = 1:NC1
+        s += A[ic, ic, ix, iy, iz, it]
+    end
+    return s
+end
+
+function LinearAlgebra.tr(C::LatticeMatrix{4,T1,AT1,3,3}) where {T1,AT1}
+    s = JACC.parallel_reduce(prod(C.PN), +, kernel_tr_4D_NC3, C.A, C.PN; init=zero(eltype(C.A)))
+end
+
+function kernel_tr_4D_NC3(i, A, PN)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    s = zero(eltype(A))
+    for ic = 1:3
+        s += A[ic, ic, ix, iy, iz, it]
+    end
+    return s
+end
+
+# ========== host side ==========
+function normalize_matrix!(C::LatticeMatrix{4,T,AT,NC,NC}) where {T,AT,NC}
+    if NC == 2
+        JACC.parallel_for(prod(C.PN), kernel_normalize_NC2!, C.A, C.PN)
+    elseif NC == 3
+        JACC.parallel_for(prod(C.PN), kernel_normalize_NC3!, C.A, C.PN)
+    else
+        # Generic: modified Gram–Schmidt per site (unitarize columns)
+        JACC.parallel_for(prod(C.PN), kernel_normalize_generic!, C.A, C.PN, NC)
+    end
+    set_halo!(C)
+end
+export normalize_matrix!
+
+
+function kernel_normalize_NC2!(i, u, PN)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    α = u[1, 1, ix, iy, iz, it]
+    β = u[2, 1, ix, iy, iz, it]
+    detU = sqrt(abs(α)^2 + abs(β)^2)
+    u[1, 1, ix, iy, iz, it] = α / detU
+    u[2, 1, ix, iy, iz, it] = β / detU
+    u[1, 2, ix, iy, iz, it] = -conj(β) / detU
+    u[2, 2, ix, iy, iz, it] = conj(α) / detU
+end
+
+function kernel_normalize_NC3!(i, u, PN)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    w1 = 0
+    w2 = 0
+    @inbounds for ic = 1:3
+        w1 += u[2, ic, ix, iy, iz, it] * conj(u[1, ic, ix, iy, iz, it])
+        w2 += u[1, ic, ix, iy, iz, it] * conj(u[1, ic, ix, iy, iz, it])
+    end
+    zerock2 = w2
+    w1 = -w1 / w2
+
+    x4 = (u[2, 1, ix, iy, iz, it]) + w1 * u[1, 1, ix, iy, iz, it]
+    x5 = (u[2, 2, ix, iy, iz, it]) + w1 * u[1, 2, ix, iy, iz, it]
+    x6 = (u[2, 3, ix, iy, iz, it]) + w1 * u[1, 3, ix, iy, iz, it]
+
+    w3 = x4 * conj(x4) + x5 * conj(x5) + x6 * conj(x6)
+
+    zerock3 = w3
+
+    u[2, 1, ix, iy, iz, it] = x4
+    u[2, 2, ix, iy, iz, it] = x5
+    u[2, 3, ix, iy, iz, it] = x6
+
+    w3 = 1 / sqrt(w3)
+    w2 = 1 / sqrt(w2)
+
+    u[1, 1, ix, iy, iz, it] = u[1, 1, ix, iy, iz, it] * w2
+    u[1, 2, ix, iy, iz, it] = u[1, 2, ix, iy, iz, it] * w2
+    u[1, 3, ix, iy, iz, it] = u[1, 3, ix, iy, iz, it] * w2
+    u[2, 1, ix, iy, iz, it] = u[2, 1, ix, iy, iz, it] * w3
+    u[2, 2, ix, iy, iz, it] = u[2, 2, ix, iy, iz, it] * w3
+    u[2, 3, ix, iy, iz, it] = u[2, 3, ix, iy, iz, it] * w3
+
+    aa1 = real(u[1, 1, ix, iy, iz, it])
+    aa2 = imag(u[1, 1, ix, iy, iz, it])
+    aa3 = real(u[1, 2, ix, iy, iz, it])
+    aa4 = imag(u[1, 2, ix, iy, iz, it])
+    aa5 = real(u[1, 3, ix, iy, iz, it])
+    aa6 = imag(u[1, 3, ix, iy, iz, it])
+    aa7 = real(u[2, 1, ix, iy, iz, it])
+    aa8 = imag(u[2, 1, ix, iy, iz, it])
+    aa9 = real(u[2, 2, ix, iy, iz, it])
+    aa10 = imag(u[2, 2, ix, iy, iz, it])
+    aa11 = real(u[2, 3, ix, iy, iz, it])
+    aa12 = imag(u[2, 3, ix, iy, iz, it])
+
+    aa13 =
+        aa3 * aa11 - aa4 * aa12 - aa5 * aa9 + aa6 * aa10
+    aa14 =
+        aa5 * aa10 + aa6 * aa9 - aa3 * aa12 - aa4 * aa11
+    aa15 = aa5 * aa7 - aa6 * aa8 - aa1 * aa11 + aa2 * aa12
+    aa16 = aa1 * aa12 + aa2 * aa11 - aa5 * aa8 - aa6 * aa7
+    aa17 = aa1 * aa9 - aa2 * aa10 - aa3 * aa7 + aa4 * aa8
+    aa18 = aa3 * aa8 + aa4 * aa7 - aa1 * aa10 - aa2 * aa9
+
+    u[3, 1, ix, iy, iz, it] = aa13 + im * aa14
+    u[3, 2, ix, iy, iz, it] = aa15 + im * aa16
+    u[3, 3, ix, iy, iz, it] = aa17 + im * aa18
+
+end
+
+
+
+# ========== device side (generic N) ==========
+# Normalize columns in-place to form a unitary (QR with Q-only), per lattice site
+function kernel_normalize_generic!(i, u, PN, NC)
+    # Index decode
+    ix, iy, iz, it = get_4Dindex(i, PN)
+
+    # Type helpers
+    T = eltype(u)
+    rT = real(one(T))
+    epsT = sqrt(eps(rT))  # tolerance for near-zero norms
+
+    # Modified Gram–Schmidt over columns j = 1..NC
+    @inbounds for j = 1:NC
+        # Orthogonalize column j against columns 1..j-1
+        for k = 1:j-1
+            # inner = ⟨u[:,k], u[:,j]⟩ = sum(conj(u[k]) * u[j])
+            inner = zero(T)
+            for r = 1:NC
+                inner += conj(u[r, k, ix, iy, iz, it]) * u[r, j, ix, iy, iz, it]
+            end
+            # u[:,j] -= inner * u[:,k]
+            for r = 1:NC
+                u[r, j, ix, iy, iz, it] -= inner * u[r, k, ix, iy, iz, it]
+            end
+        end
+
+        # Compute 2-norm of column j
+        nrm2 = zero(rT)
+        for r = 1:NC
+            nrm2 += abs2(u[r, j, ix, iy, iz, it])
+        end
+        nrm = sqrt(nrm2)
+
+        # Handle near-zero; fall back to a canonical basis vector
+        if nrm < epsT
+            # Zero column then set j-th row to 1 (produces consistent unitary completion)
+            for r = 1:NC
+                u[r, j, ix, iy, iz, it] = zero(T)
+            end
+            u[j, j, ix, iy, iz, it] = one(T)
+        else
+            # Normalize column j
+            invn = one(rT) / nrm
+            invnT = convert(T, invn)  # keep type stability for Complex/Real T
+            for r = 1:NC
+                u[r, j, ix, iy, iz, it] *= invnT
+            end
+        end
+    end
+
+    # Optional: single re-orthogonalization sweep for improved numerical stability
+    # (uncomment if needed)
+    # @inbounds for j = 1:NC
+    #     for k = 1:j-1
+    #         inner = zero(T)
+    #         for r = 1:NC
+    #             inner += conj(u[r,k,ix,iy,iz,it]) * u[r,j,ix,iy,iz,it]
+    #         end
+    #         for r = 1:NC
+    #             u[r,j,ix,iy,iz,it] -= inner * u[r,k,ix,iy,iz,it]
+    #         end
+    #     end
+    #     nrm2 = zero(rT)
+    #     for r = 1:NC
+    #         nrm2 += abs2(u[r,j,ix,iy,iz,it])
+    #     end
+    #     nrm = sqrt(nrm2)
+    #     invnT = convert(T, one(rT)/max(nrm, epsT))
+    #     for r = 1:NC
+    #         u[r,j,ix,iy,iz,it] *= invnT
+    #     end
+    # end
+
+    return nothing
+end
