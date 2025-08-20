@@ -3,12 +3,21 @@
 
 # ---------------- PCG32 core (safe on GPU) ----------------
 # All integer ops; rotation count as Int to avoid implicit conversions.
+# PCG32 step: safe for Julia/CPU & CUDA
 @inline function pcg32_step(state::UInt64, inc::UInt64)
-    oldstate   = state
-    state      = oldstate * 0x5851F42D4C957F2D % UInt64 + (inc | 0x01)
-    xorshifted = UInt32(((oldstate >> 18) ⊻ oldstate) >> 27)
-    rot        = Int(oldstate >> 59)
-    out        = (xorshifted >> rot) | (xorshifted << ((32 - rot) & 31))
+    oldstate = state
+    # 64-bit LCG update (wraps mod 2^64 automatically for UInt64)
+    state = oldstate * 0x5851F42D4C957F2D + (inc | 0x01)
+
+    # Mix and squeeze to 32 bits
+    # IMPORTANT: mask to 32 bits before converting to UInt32 to avoid InexactError.
+    x = ((oldstate >> 18) ⊻ oldstate) >> 27         # still up to 37 bits here
+    xorshifted = UInt32(x & 0xFFFF_FFFF)            # explicit truncation to 32 bits
+
+    # Rotate by high bits of oldstate
+    rot = Int(oldstate >> 59)                       # shift count must be Int
+    out = (xorshifted >> rot) | (xorshifted << ((32 - rot) & 31))
+
     return state, out
 end
 
