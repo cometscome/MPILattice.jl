@@ -1342,55 +1342,79 @@ function randomize_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2
 end
 export randomize_matrix!
 
-# --- Kernel: fill Complex/Real arrays with uniform [-0.5, 0.5) safely on GPU ---
-function kernel_randomize_4D!(i, u, PN, NC1, NC2, nw,seed0::UInt64)
+# We split on element type at compile time via Val to avoid dynamic branches.
+function kernel_randomize_4D!(i, u, PN, NC1, NC2, nw, seed0::UInt64)
     ix, iy, iz, it = get_4Dindex(i, PN)
+    T = eltype(u)
 
-    # Element type T (e.g., ComplexF32, ComplexF64, Float32, Float64)
-    T  = eltype(u)
-    # Real-part element type, as a TYPE (e.g., Float32/Float64), not a value
-    RT = typeof(real(zero(T)))
-
-    for jc = 1:NC2
-        for ic = 1:NC1
-            state, inc = mix_seed(ix+nw, iy+nw, iz+nw, it+nw,ic,jc,seed0)
-
-            # Choose f32/f64 path 
-            if RT === Float32
-                # Real part
-                state, r1 = pcg32_step(state, inc)
-                realv = u01_f32(r1) - 0.5f0
-
-                if T <: Complex
-                    # Imag part
-                    state, i1 = pcg32_step(state, inc)
-                    imagv = u01_f32(i1) - 0.5f0
-                    cval  = complex(realv, imagv)            # Complex{Float32}
-                    u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = convert(T, cval)
-                else
-                    u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = convert(T, realv)
-                end
-            else
-                # Float64 path
-                state, r1 = pcg32_step(state, inc)
-                state, r2 = pcg32_step(state, inc)
-                realv = u01_f64(r1, r2) - 0.5
-
-                if T <: Complex
-                    state, i1 = pcg32_step(state, inc)
-                    state, i2 = pcg32_step(state, inc)
-                    imagv = u01_f64(i1, i2) - 0.5
-                    cval  = complex(realv, imagv)            # Complex{Float64}
-                    u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = convert(T, cval)
-                else
-                    u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = convert(T, realv)
-                end
-            end
-        end
+    if T === ComplexF32
+        _rand_fill!(Val(:c32), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+    elseif T === ComplexF64
+        _rand_fill!(Val(:c64), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+    elseif T === Float32
+        _rand_fill!(Val(:r32), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+    elseif T === Float64
+        _rand_fill!(Val(:r64), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+    else
+        # If you ever support other types, you can add more specializations.
+        # For now, throw a clear error on host side before launching widely.
+        @assert false "Unsupported eltype in randomize: $(T)"
     end
     return nothing
 end
 
+# --- Specializations (no convert(T, ...) inside) ---
+
+# ComplexF32
+@inline function _rand_fill!(::Val{:c32}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+    @inbounds for jc = 1:NC2, ic = 1:NC1
+        state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
+        state, r1  = pcg32_step(state, inc)
+        state, r2  = pcg32_step(state, inc)
+        realv = u01_f32(r1) - 0.5f0
+        imagv = u01_f32(r2) - 0.5f0
+        u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = ComplexF32(realv, imagv)
+    end
+    return nothing
+end
+
+# ComplexF64
+@inline function _rand_fill!(::Val{:c64}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+    @inbounds for jc = 1:NC2, ic = 1:NC1
+        state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
+        state, r1  = pcg32_step(state, inc)
+        state, r2  = pcg32_step(state, inc)
+        realv = u01_f64(r1, r2) - 0.5
+        state, i1  = pcg32_step(state, inc)
+        state, i2  = pcg32_step(state, inc)
+        imagv = u01_f64(i1, i2) - 0.5
+        u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = ComplexF64(realv, imagv)
+    end
+    return nothing
+end
+
+# Float32
+@inline function _rand_fill!(::Val{:r32}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+    @inbounds for jc = 1:NC2, ic = 1:NC1
+        state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
+        state, r1  = pcg32_step(state, inc)
+        realv = u01_f32(r1) - 0.5f0
+        u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = realv  # already Float32
+    end
+    return nothing
+end
+
+# Float64
+@inline function _rand_fill!(::Val{:r64}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+    @inbounds for jc = 1:NC2, ic = 1:NC1
+        state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
+        state, r1  = pcg32_step(state, inc)
+        state, r2  = pcg32_step(state, inc)
+        realv = u01_f64(r1, r2) - 0.5
+        u[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = realv  # already Float64
+    end
+    return nothing
+end
 
 function clear_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
     JACC.parallel_for(prod(C.PN), kernel_clear_4D!, C.A, C.PN, NC1, NC2,C.nw)

@@ -1,43 +1,33 @@
 # ---------------- Device-safe tiny PRNG (PCG32, stateless per element) ----------------
 # All functions are @inline and pure; no dynamic dispatch, no allocations.
 
-#=
-# One PCG32 step: returns a new 64-bit state and a 32-bit output
-@inline function pcg32_step(state::UInt64, inc::UInt64)
-    oldstate = state
-    state = oldstate * 0x5851F42D4C957F2D + (inc | 1)   # 6364136223846793005
-    xorshifted = UInt32(((oldstate >> 18) ⊻ oldstate) >> 27)
-    rot = oldstate >> 59
-    out = (xorshifted >> rot) | (xorshifted << ((-rot) & 31))
-    return state, out
-end
-=#
-
-# --- 1) PCG32: make shift counts Int (avoid weird conversions) ---
+# ---------------- PCG32 core (safe on GPU) ----------------
+# All integer ops; rotation count as Int to avoid implicit conversions.
 @inline function pcg32_step(state::UInt64, inc::UInt64)
     oldstate   = state
-    state      = oldstate * 0x5851F42D4C957F2D + (inc | 1)
+    state      = oldstate * 0x5851F42D4C957F2D % UInt64 + (inc | 0x01)
     xorshifted = UInt32(((oldstate >> 18) ⊻ oldstate) >> 27)
-    rot        = Int(oldstate >> 59)                     # was UInt64
+    rot        = Int(oldstate >> 59)
     out        = (xorshifted >> rot) | (xorshifted << ((32 - rot) & 31))
     return state, out
 end
 
-# Simple index hashing to make a per-element seed and stream (inc)
+# Map UInt32 -> uniform in [0,1) as Float32
+@inline u01_f32(x::UInt32) = Float32(x) * Float32(2.3283064365386963f-10)  # 1/2^32
+
+# Map two UInt32 -> uniform in [0,1) with ~53 bits as Float64
+@inline function u01_f64(x::UInt32, y::UInt32)
+    # (x<<21 ^ y>>11) gives 53 bits; scale by 2^-53
+    mant = (UInt64(x) << 21) ⊻ (UInt64(y) >> 11)
+    return Float64(mant) * 1.1102230246251565e-16  # 2^-53
+end
+
+# Deterministic per-site stream: combine indices into (state,inc)
 @inline function mix_seed(ix,iy,iz,it,ic,jc,seed0::UInt64)
-    s = seed0
-    s ⊻= UInt64(ix)*0x9E3779B97F4A7C15
-    s ⊻= UInt64(iy)*0xBF58476D1CE4E5B9
-    s ⊻= UInt64(iz)*0x94D049BB133111EB
-    s ⊻= UInt64(it)*0x2545F4914F6CDD1D
-    s ⊻= (UInt64(ic) << 32) ⊻ UInt64(jc)
-    return s, s ⊻ 0xDEADBEEFCAFEBABE  # (state, inc)
+    h = seed0 ⊻ (UInt64(ix) * 0x9E3779B97F4A7C15) ⊻ (UInt64(iy) * 0xBF58476D1CE4E5B9) ⊻
+        (UInt64(iz) * 0x94D049BB133111EB) ⊻ (UInt64(it) * 0xD6E8FEB86659FD93) ⊻
+        (UInt64(ic) * 0xA24BAED4963EE407) ⊻ (UInt64(jc) * 0x9FB21C651E98DF25)
+    state = h ⊻ 0xDA942042E4DD58B5
+    inc   = (h >> 1) | 0x1                 # must be odd
+    return state, inc
 end
-
-# Convert u32 to Float32/Float64 in [0,1)
-@inline u01_f32(x::UInt32) = Float32(x) * (1f0 / 2.0f32^32)
-@inline function u01_f64(x1::UInt32, x2::UInt32)
-    u = (UInt64(x1) << 32) | UInt64(x2)
-    return Float64(u) * (1.0 / 2.0^64)
-end
-
