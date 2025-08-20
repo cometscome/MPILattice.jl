@@ -1337,24 +1337,24 @@ end
 # Host wrapper: choose a fixed or time-based seed and launch
 function randomize_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
     seed0 = UInt64(0x12345678ABCDEF01)  # or UInt64(time_ns())
-    JACC.parallel_for(prod(C.PN), kernel_randomize_4D!, C.A, C.PN, NC1, NC2, C.nw,seed0)
+    JACC.parallel_for(prod(C.PN), kernel_randomize_4D!, C.A, C.PN, Val(NC1), Val(NC2), C.nw,seed0)
     set_halo!(C)
 end
 export randomize_matrix!
 
 # We split on element type at compile time via Val to avoid dynamic branches.
-function kernel_randomize_4D!(i, u, PN, NC1, NC2, nw, seed0::UInt64)
+function kernel_randomize_4D!(i, u, PN, ::Val{NC1}, ::Val{NC2}, nw, seed0::UInt64) where {NC1,NC2}
     ix, iy, iz, it = get_4Dindex(i, PN)
     T = eltype(u)
 
     if T === ComplexF32
-        _rand_fill!(Val(:c32), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+        _rand_fill!(Val(:c32), ix,iy,iz,it, u, Val(NC1), Val(NC2), nw, seed0)
     elseif T === ComplexF64
-        _rand_fill!(Val(:c64), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+        _rand_fill!(Val(:c64), ix,iy,iz,it, u, Val(NC1), Val(NC2), nw, seed0)
     elseif T === Float32
-        _rand_fill!(Val(:r32), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+        _rand_fill!(Val(:r32), ix,iy,iz,it, u, Val(NC1), Val(NC2), nw, seed0)
     elseif T === Float64
-        _rand_fill!(Val(:r64), ix,iy,iz,it, u, NC1,NC2, nw, seed0)
+        _rand_fill!(Val(:r64), ix,iy,iz,it, u, Val(NC1), Val(NC2), nw, seed0)
     else
         # If you ever support other types, you can add more specializations.
         # For now, throw a clear error on host side before launching widely.
@@ -1366,7 +1366,7 @@ end
 # --- Specializations (no convert(T, ...) inside) ---
 
 # ComplexF32
-@inline function _rand_fill!(::Val{:c32}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+@inline function _rand_fill!(::Val{:c32}, ix,iy,iz,it, u, ::Val{NC1}, ::Val{NC2}, nw, seed0::UInt64) where {NC1,NC2}
     @inbounds for jc = 1:NC2, ic = 1:NC1
         state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
         state, r1  = pcg32_step(state, inc)
@@ -1379,7 +1379,7 @@ end
 end
 
 # ComplexF64
-@inline function _rand_fill!(::Val{:c64}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+@inline function _rand_fill!(::Val{:c64}, ix,iy,iz,it, u,::Val{NC1}, ::Val{NC2}, nw, seed0::UInt64) where {NC1,NC2}
     @inbounds for jc = 1:NC2, ic = 1:NC1
         state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
         state, r1  = pcg32_step(state, inc)
@@ -1394,7 +1394,7 @@ end
 end
 
 # Float32
-@inline function _rand_fill!(::Val{:r32}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+@inline function _rand_fill!(::Val{:r32}, ix,iy,iz,it, u,::Val{NC1}, ::Val{NC2}, nw, seed0::UInt64) where {NC1,NC2}
     @inbounds for jc = 1:NC2, ic = 1:NC1
         state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
         state, r1  = pcg32_step(state, inc)
@@ -1405,7 +1405,7 @@ end
 end
 
 # Float64
-@inline function _rand_fill!(::Val{:r64}, ix,iy,iz,it, u, NC1,NC2, nw, seed0::UInt64)
+@inline function _rand_fill!(::Val{:r64}, ix,iy,iz,it, u,::Val{NC1}, ::Val{NC2}, nw, seed0::UInt64) where {NC1,NC2}
     @inbounds for jc = 1:NC2, ic = 1:NC1
         state, inc = mix_seed(ix+nw,iy+nw,iz+nw,it+nw,ic,jc,seed0)
         state, r1  = pcg32_step(state, inc)
@@ -1417,12 +1417,12 @@ end
 end
 
 function clear_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
-    JACC.parallel_for(prod(C.PN), kernel_clear_4D!, C.A, C.PN, NC1, NC2,C.nw)
+    JACC.parallel_for(prod(C.PN), kernel_clear_4D!, C.A, C.PN, Val(NC1), Val(NC2),C.nw)
     set_halo!(C)
 end
 export clear_matrix!
 
-function kernel_clear_4D!(i, u, PN, NC1, NC2,nw)
+function kernel_clear_4D!(i, u, PN, ::Val{NC1}, ::Val{NC2},nw) where {NC1,NC2}
     ix, iy, iz, it = get_4Dindex(i, PN)
 
     for jc = 1:NC2
@@ -1434,12 +1434,12 @@ function kernel_clear_4D!(i, u, PN, NC1, NC2,nw)
 end
 
 function makeidentity_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
-    JACC.parallel_for(prod(C.PN), kernel_makeidentity_4D!, C.A, C.PN, NC1, NC2,C.nw)
+    JACC.parallel_for(prod(C.PN), kernel_makeidentity_4D!, C.A, C.PN, Val(NC1), Val(NC2),C.nw)
     set_halo!(C)
 end
 export makeidentity_matrix!
 
-function kernel_makeidentity_4D!(i, u, PN, NC1, NC2,nw)
+function kernel_makeidentity_4D!(i, u, PN, ::Val{NC1}, ::Val{NC2},nw) where {NC1,NC2}
     ix, iy, iz, it = get_4Dindex(i, PN)
 
     for jc = 1:NC2
@@ -1452,12 +1452,12 @@ end
 
 #C = C+ α*A
 function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::LatticeMatrix{4,T1,AT1,NC1,NC2}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2}
-    JACC.parallel_for(prod(C.PN), kernel_add_4D!, C.A, A.A, C.PN, NC1, NC2, α,C.nw)
+    JACC.parallel_for(prod(C.PN), kernel_add_4D!, C.A, A.A, C.PN, Val(NC1), Val(NC2), α,C.nw)
     set_halo!(C)
 end
 export add_matrix!
 
-function kernel_add_4D!(i, u, v, PN, NC1, NC2, α,nw)
+function kernel_add_4D!(i, u, v, PN,::Val{NC1}, ::Val{NC2}, α,nw) where{NC1,NC2}
     ix, iy, iz, it = get_4Dindex(i, PN)
 
     for jc = 1:NC2
@@ -1469,12 +1469,12 @@ end
 
 #C = C+ α*shiftA
 function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::Shifted_Lattice{LatticeMatrix{4,T1,AT1,NC1,NC2},shift}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2,shift}
-    JACC.parallel_for(prod(C.PN), kernel_add_4D_shift!, C.A, A.A, C.PN, NC1, NC2, α, shift,C.nw)
+    JACC.parallel_for(prod(C.PN), kernel_add_4D_shift!, C.A, A.A, C.PN, Val(NC1), Val(NC2), α, shift,C.nw)
     set_halo!(C)
 end
 
 
-function kernel_add_4D_shift!(i, u, v, PN, NC1, NC2, α, shift,nw)
+function kernel_add_4D_shift!(i, u, v, PN, ::Val{NC1}, ::Val{NC2}, α, shift,nw) where {NC1,NC2}
     ix, iy, iz, it = get_4Dindex(i, PN)
     ixp = ix + shift[1]
     iyp = iy + shift[2]
@@ -1490,11 +1490,11 @@ end
 
 #C = C+ α*Adag
 function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::Adjoint_Lattice{LatticeMatrix{4,T1,AT1,NC1,NC2}}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2}
-    JACC.parallel_for(prod(C.PN), kernel_add_4D_dag!, C.A, A.A, C.PN, NC1, NC2, α,C.nw)
+    JACC.parallel_for(prod(C.PN), kernel_add_4D_dag!, C.A, A.A, C.PN, Val(NC1), Val(NC2), α,C.nw)
     set_halo!(C)
 end
 
-function kernel_add_4D_dag!(i, u, v, PN, NC1, NC2, α,nw)
+function kernel_add_4D_dag!(i, u, v, PN, ::Val{NC1}, ::Val{NC2}, α,nw) where {NC1,NC2}
     ix, iy, iz, it = get_4Dindex(i, PN)
 
     for jc = 1:NC2
@@ -1506,12 +1506,12 @@ end
 
 #C = C+ α*shiftAdag
 function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T1,AT1,NC1,NC2},shift}}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2,shift}
-    JACC.parallel_for(prod(C.PN), kernel_add_4D_shiftdag!, C.A, A.A, C.PN, NC1, NC2, α, shift,C.nw)
+    JACC.parallel_for(prod(C.PN), kernel_add_4D_shiftdag!, C.A, A.A, C.PN, Val(NC1), Val(NC2), α, shift,C.nw)
     set_halo!(C)
 end
 
 
-function kernel_add_4D_shiftdag!(i, u, v, PN, NC1, NC2, α, shift,nw)
+function kernel_add_4D_shiftdag!(i, u, v, PN, ::Val{NC1}, ::Val{NC2}, α, shift,nw) where {NC1,NC2}
     ix, iy, iz, it = get_4Dindex(i, PN)
     ixp = ix + shift[1]
     iyp = iy + shift[2]
