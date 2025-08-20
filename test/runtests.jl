@@ -80,6 +80,9 @@ function normalizetest(NC)
     display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it] * M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it]')
     makeidentity_matrix!(M2)
     display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+
+    s = partial_trace(M2, 1)
+    println(s)
 end
 
 

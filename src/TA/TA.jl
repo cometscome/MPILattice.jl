@@ -22,7 +22,27 @@ const sr3ih = 0.5 * sr3i
 const sqr3inv = sr3i
 const sr3i2 = 2 * sr3i
 
+function traceless_antihermitian!(A::LatticeMatrix{4,T,AT,N,N}) where {T,AT,N}
+    if N == 3
+        JACC.parallel_for(
+            prod(A.PN), kernel_traceless_antihermitian_4DNC3!, A.A, A.nw, A.PN)
+    elseif N == 2
+        JACC.parallel_for(
+            prod(A.PN), kernel_traceless_antihermitian_4DNC2!, A.A, A.nw, A.PN)
+    elseif N == 1
+        @warn("No traceless antihermitian condition applied for SU(1). This is a scalar lattice, so no special unitary condition is needed.")
+        # For N=1, no SU(N) condition is needed, as it is just a scalar.
+    else
+        JACC.parallel_for(
+            prod(A.PN), kernel_traceless_antihermitian_4D!, A.A, N, A.nw, A.PN)
+        #error("Unsupported number of colors for special unitary lattice: $N")
+    end
+    set_halo!(A)
+end
+
 function traceless_antihermitian!(A::TALattice{4,T,AT,N}) where {T,AT,N}
+    traceless_antihermitian!(A.lt)
+    #=
     if N == 3
         JACC.parallel_for(
             prod(A.lt.PN), kernel_traceless_antihermitian_4DNC3!, A.lt.A, A.lt.nw, A.lt.PN)
@@ -38,6 +58,7 @@ function traceless_antihermitian!(A::TALattice{4,T,AT,N}) where {T,AT,N}
         #error("Unsupported number of colors for special unitary lattice: $N")
     end
     set_halo!(A.lt)
+    =#
 end
 
 
@@ -195,15 +216,15 @@ function kernel_4Dexpt_SU3!(i, C, A, PN, t)
     csum = c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8
     if csum == 0
         c = Mat3{eltype(C)}(one(eltype(C)))
-        C[1,1,ix, iy, iz, it] = c.a11
-        C[1,2,ix, iy, iz, it] = c.a12
-        C[1,3,ix, iy, iz, it] = c.a13
-        C[2,1,ix, iy, iz, it] = c.a21
-        C[2,2,ix, iy, iz, it] = c.a22
-        C[2,3,ix, iy, iz, it] = c.a23
-        C[3,1,ix, iy, iz, it] = c.a31
-        C[3,2,ix, iy, iz, it] = c.a32
-        C[3,3,ix, iy, iz, it] = c.a33
+        C[1, 1, ix, iy, iz, it] = c.a11
+        C[1, 2, ix, iy, iz, it] = c.a12
+        C[1, 3, ix, iy, iz, it] = c.a13
+        C[2, 1, ix, iy, iz, it] = c.a21
+        C[2, 2, ix, iy, iz, it] = c.a22
+        C[2, 3, ix, iy, iz, it] = c.a23
+        C[3, 1, ix, iy, iz, it] = c.a31
+        C[3, 2, ix, iy, iz, it] = c.a32
+        C[3, 3, ix, iy, iz, it] = c.a33
 
     end
 
@@ -364,15 +385,15 @@ function kernel_4Dexpt_SU3!(i, C, A, PN, t)
     #    c.a21 c.a22 c.a23;
     #    c.a31 c.a32 c.a33]
 
-    C[1,1,ix, iy, iz, it] = c.a11
-    C[1,2,ix, iy, iz, it] = c.a12
-    C[1,3,ix, iy, iz, it] = c.a13
-    C[2,1,ix, iy, iz, it] = c.a21
-    C[2,2,ix, iy, iz, it] = c.a22
-    C[2,3,ix, iy, iz, it] = c.a23
-    C[3,1,ix, iy, iz, it] = c.a31
-    C[3,2,ix, iy, iz, it] = c.a32
-    C[3,3,ix, iy, iz, it] = c.a33   
+    C[1, 1, ix, iy, iz, it] = c.a11
+    C[1, 2, ix, iy, iz, it] = c.a12
+    C[1, 3, ix, iy, iz, it] = c.a13
+    C[2, 1, ix, iy, iz, it] = c.a21
+    C[2, 2, ix, iy, iz, it] = c.a22
+    C[2, 3, ix, iy, iz, it] = c.a23
+    C[3, 1, ix, iy, iz, it] = c.a31
+    C[3, 2, ix, iy, iz, it] = c.a32
+    C[3, 3, ix, iy, iz, it] = c.a33
 
     #=
     w[1, 1, ix, iy, iz, it] = w1 + im * w2

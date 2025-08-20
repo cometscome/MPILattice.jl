@@ -30,6 +30,8 @@ function kernel_4Dvector_mul!(i, C, A, B, NC, nw, PN)
     end
 end
 
+
+#C = A B 
 function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
     A::LatticeMatrix{4,T2,AT2,NC1,NC3}, B::LatticeMatrix{4,T3,AT3,NC3,NC2}) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
 
@@ -42,8 +44,8 @@ end
 
 function kernel_4Dmatrix_mul!(i, C, A, B, NC1, NC2, NC3, nw, PN)
     ix, iy, iz, it = get_4Dindex(i, PN)
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
@@ -51,6 +53,30 @@ function kernel_4Dmatrix_mul!(i, C, A, B, NC1, NC2, NC3, nw, PN)
         end
     end
 end
+
+#C = A B α + C β
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::LatticeMatrix{4,T2,AT2,NC1,NC3}, B::LatticeMatrix{4,T3,AT3,NC3,NC2}, α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul!, C.A, A.A, B.A, NC1, NC2, NC3, C.nw, C.PN, α, β
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul!(i, C, A, B, NC1, NC2, NC3, nw, PN, α, β)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            end
+        end
+    end
+end
+
 
 
 
@@ -132,8 +158,8 @@ end
 
 function kernel_4Dmatrix_mul_AdagB!(i, C, A, B, NC1, NC2, NC3, nw, PN)
     ix, iy, iz, it = get_4Dindex(i, PN)
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
@@ -142,7 +168,32 @@ function kernel_4Dmatrix_mul_AdagB!(i, C, A, B, NC1, NC2, NC3, nw, PN)
     end
 end
 
+#C = α*A'*B+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3}}, B::LatticeMatrix{4,T3,AT3,NC3,NC2},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
 
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_AdagB!, C.A, A.data.A, B.A, NC1, NC2, NC3, C.nw, C.PN, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_AdagB!(i, C, A, B, NC1, NC2, NC3, nw, PN, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            end
+        end
+    end
+end
+
+
+#C = A*B'
 function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
     A::LatticeMatrix{4,T2,AT2,NC1,NC3}, B::Adjoint_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2}}) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
 
@@ -155,8 +206,8 @@ end
 
 function kernel_4Dmatrix_mul_ABdag!(i, C, A, B, NC1, NC2, NC3, nw, PN)
     ix, iy, iz, it = get_4Dindex(i, PN)
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
@@ -165,6 +216,31 @@ function kernel_4Dmatrix_mul_ABdag!(i, C, A, B, NC1, NC2, NC3, nw, PN)
     end
 end
 
+#C = α* A*B' + β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::LatticeMatrix{4,T2,AT2,NC1,NC3}, B::Adjoint_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_ABdag!, C.A, A.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_ABdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
+            end
+        end
+    end
+end
+
+#C = A'*B'
 function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
     A::Adjoint_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3}}, B::Adjoint_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2}}) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
     JACC.parallel_for(
@@ -176,11 +252,34 @@ end
 
 function kernel_4Dmatrix_mul_AdagBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN)
     ix, iy, iz, it = get_4Dindex(i, PN)
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
+            end
+        end
+    end
+end
+
+#C =  α* A'*B' + β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3}}, B::Adjoint_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3}
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_AdagBdag!, C.A, A.data.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_AdagBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
             end
         end
     end
@@ -280,11 +379,40 @@ function kernel_4Dmatrix_mul_shiftAB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift)
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ixp+nw, iyp+nw, izp+nw, itp+nw] * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            end
+        end
+    end
+end
+
+#C = α shiftedA*B + β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shift}, B::LatticeMatrix{4,T3,AT3,NC3,NC2},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftAB!, C.A, A.data.A, B.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftAB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ixp+nw, iyp+nw, izp+nw, itp+nw] * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
             end
         end
     end
@@ -308,8 +436,8 @@ function kernel_4Dmatrix_mul_AshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift)
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[kc, jc, ixp+nw, iyp+nw, izp+nw, itp+nw]
@@ -317,6 +445,38 @@ function kernel_4Dmatrix_mul_AshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift)
         end
     end
 end
+
+#C = α A*shiftedB + β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::LatticeMatrix{4,T2,AT2,NC1,NC3}, B::Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shift},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_AshiftB!, C.A, A.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_AshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[kc, jc, ixp+nw, iyp+nw, izp+nw, itp+nw]
+            end
+        end
+    end
+end
+
+
+
 
 
 #C = shiftedA'*B
@@ -337,11 +497,40 @@ function kernel_4Dmatrix_mul_shiftAdagB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shif
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ixp+nw, iyp+nw, izp+nw, itp+nw]' * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            end
+        end
+    end
+end
+
+#C = α*shiftedA'*B + β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shift}}, B::LatticeMatrix{4,T3,AT3,NC3,NC2},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftAdagB!, C.A, A.data.data.A, B.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftAdagB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ixp+nw, iyp+nw, izp+nw, itp+nw]' * B[kc, jc, ix+nw, iy+nw, iz+nw, it+nw]
             end
         end
     end
@@ -365,11 +554,40 @@ function kernel_4Dmatrix_mul_shiftABdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shif
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ixp+nw, iyp+nw, izp+nw, itp+nw] * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
+            end
+        end
+    end
+end
+
+#C = α*shiftedA*B'+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shift}, B::Adjoint_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftABdag!, C.A, A.data.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftABdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ixp+nw, iyp+nw, izp+nw, itp+nw] * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
             end
         end
     end
@@ -393,8 +611,8 @@ function kernel_4Dmatrix_mul_shiftAdagBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, s
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ixp+nw, iyp+nw, izp+nw, itp+nw]' * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
@@ -402,6 +620,36 @@ function kernel_4Dmatrix_mul_shiftAdagBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, s
         end
     end
 end
+
+#C = α*shiftedA'*B'+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shift}}, B::Adjoint_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftAdagBdag!, C.A, A.data.data.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftAdagBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ixp+nw, iyp+nw, izp+nw, itp+nw]' * B[jc, kc, ix+nw, iy+nw, iz+nw, it+nw]'
+            end
+        end
+    end
+end
+
 
 #C = A'*shiftedB
 function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
@@ -421,8 +669,8 @@ function kernel_4Dmatrix_mul_AdagshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shif
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[kc, jc, ixp+nw, iyp+nw, izp+nw, itp+nw]
@@ -430,6 +678,36 @@ function kernel_4Dmatrix_mul_AdagshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shif
         end
     end
 end
+
+#C = α*A'*shiftedB+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3}}, B::Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shift},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_AdagshiftB!, C.A, A.data.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_AdagshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[kc, jc, ixp+nw, iyp+nw, izp+nw, itp+nw]
+            end
+        end
+    end
+end
+
 
 #C = A*shiftedB'
 function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
@@ -449,11 +727,40 @@ function kernel_4Dmatrix_mul_AshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shif
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[jc, kc, ixp+nw, iyp+nw, izp+nw, itp+nw]'
+            end
+        end
+    end
+end
+
+#C = α*A*shiftedB'+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::LatticeMatrix{4,T2,AT2,NC1,NC3}, B::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shift}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_AshiftBdag!, C.A, A.A, B.data.data.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_AshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ix+nw, iy+nw, iz+nw, it+nw] * B[jc, kc, ixp+nw, iyp+nw, izp+nw, itp+nw]'
             end
         end
     end
@@ -477,8 +784,8 @@ function kernel_4Dmatrix_mul_AdagshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, s
     izp = iz + shift[3]
     itp = it + shift[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[jc, kc, ixp+nw, iyp+nw, izp+nw, itp+nw]'
@@ -486,6 +793,36 @@ function kernel_4Dmatrix_mul_AdagshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, s
         end
     end
 end
+
+#C = α*A'*shiftedB'+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3}}, B::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shift}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shift}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_AdagshiftBdag!, C.A, A.data.A, B.data.data.A, NC1, NC2, NC3, C.nw, C.PN, shift, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_AdagshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shift, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ix+nw, iy+nw, iz+nw, it+nw]' * B[jc, kc, ixp+nw, iyp+nw, izp+nw, itp+nw]'
+            end
+        end
+    end
+end
+
 
 
 #C = shiftA*shiftedB
@@ -511,11 +848,45 @@ function kernel_4Dmatrix_mul_shiftAshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, sh
     izpB = iz + shiftB[3]
     itpB = it + shiftB[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ixpA+nw, iypA+nw, izpA+nw, itpA+nw] * B[kc, jc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]
+            end
+        end
+    end
+end
+
+#C = α*shiftA*shiftedB+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shiftA}, B::Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shiftB},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,AT3,NC1,NC2,NC3,shiftA,shiftB}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftAshiftB!, C.A, A.data.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, shiftA, shiftB, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftAshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shiftA, shiftB, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixpA = ix + shiftA[1]
+    iypA = iy + shiftA[2]
+    izpA = iz + shiftA[3]
+    itpA = it + shiftA[4]
+
+    ixpB = ix + shiftB[1]
+    iypB = iy + shiftB[2]
+    izpB = iz + shiftB[3]
+    itpB = it + shiftB[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ixpA+nw, iypA+nw, izpA+nw, itpA+nw] * B[kc, jc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]
             end
         end
     end
@@ -545,11 +916,46 @@ function kernel_4Dmatrix_mul_shiftAdagshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN,
     izpB = iz + shiftB[3]
     itpB = it + shiftB[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ixpA+nw, iypA+nw, izpA+nw, itpA+nw]' * B[kc, jc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]
+            end
+        end
+    end
+end
+
+#C = α*shiftA'*shiftedB+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shiftA}}, B::Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shiftB},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,
+    AT3,NC1,NC2,NC3,shiftA,shiftB}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftAdagshiftB!, C.A, A.data.data.A, B.data.A, NC1, NC2, NC3, C.nw, C.PN, shiftA, shiftB, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftAdagshiftB!(i, C, A, B, NC1, NC2, NC3, nw, PN, shiftA, shiftB, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixpA = ix + shiftA[1]
+    iypA = iy + shiftA[2]
+    izpA = iz + shiftA[3]
+    itpA = it + shiftA[4]
+
+    ixpB = ix + shiftB[1]
+    iypB = iy + shiftB[2]
+    izpB = iz + shiftB[3]
+    itpB = it + shiftB[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ixpA+nw, iypA+nw, izpA+nw, itpA+nw]' * B[kc, jc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]
             end
         end
     end
@@ -580,11 +986,47 @@ function kernel_4Dmatrix_mul_shiftAshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN,
     izpB = iz + shiftB[3]
     itpB = it + shiftB[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[ic, kc, ixpA+nw, iypA+nw, izpA+nw, itpA+nw] * B[jc, kc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]'
+            end
+        end
+    end
+end
+
+#C = α* shiftA*shiftedB'+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shiftA},
+    B::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shiftB}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,
+    AT3,NC1,NC2,NC3,shiftA,shiftB}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftAshiftBdag!, C.A, A.data.A, B.data.data.A, NC1, NC2, NC3, C.nw, C.PN, shiftA, shiftB, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftAshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shiftA, shiftB, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixpA = ix + shiftA[1]
+    iypA = iy + shiftA[2]
+    izpA = iz + shiftA[3]
+    itpA = it + shiftA[4]
+
+    ixpB = ix + shiftB[1]
+    iypB = iy + shiftB[2]
+    izpB = iz + shiftB[3]
+    itpB = it + shiftB[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[ic, kc, ixpA+nw, iypA+nw, izpA+nw, itpA+nw] * B[jc, kc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]'
             end
         end
     end
@@ -615,11 +1057,47 @@ function kernel_4Dmatrix_mul_shiftAdagshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, 
     izpB = iz + shiftB[3]
     itpB = it + shiftB[4]
 
-    for ic = 1:NC1
-        for jc = 1:NC2
+    for jc = 1:NC2
+        for ic = 1:NC1
             C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = 0
             for kc = 1:NC3
                 C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += A[kc, ic, ixpA+nw, iypA+nw, izpA+nw, itpA+nw]' * B[jc, kc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]'
+            end
+        end
+    end
+end
+
+#C = α*shiftA'*shiftedB'+β*C
+function LinearAlgebra.mul!(C::LatticeMatrix{4,T1,AT1,NC1,NC2},
+    A::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T2,AT2,NC1,NC3},shiftA}},
+    B::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T3,AT3,NC3,NC2},shiftB}},
+    α::Number, β::Number) where {T1,T2,T3,AT1,AT2,
+    AT3,NC1,NC2,NC3,shiftA,shiftB}
+
+    JACC.parallel_for(
+        prod(C.PN), kernel_4Dmatrix_mul_shiftAdagshiftBdag!, C.A, A.data.data.A, B.data.data.A, NC1, NC2, NC3, C.nw, C.PN, shiftA, shiftB, α::Number, β::Number
+    )
+    set_halo!(C)
+end
+
+
+function kernel_4Dmatrix_mul_shiftAdagshiftBdag!(i, C, A, B, NC1, NC2, NC3, nw, PN, shiftA, shiftB, α::Number, β::Number)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixpA = ix + shiftA[1]
+    iypA = iy + shiftA[2]
+    izpA = iz + shiftA[3]
+    itpA = it + shiftA[4]
+
+    ixpB = ix + shiftB[1]
+    iypB = iy + shiftB[2]
+    izpB = iz + shiftB[3]
+    itpB = it + shiftB[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] = β * C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw]
+            for kc = 1:NC3
+                C[ic, jc, ix+nw, iy+nw, iz+nw, it+nw] += α * A[kc, ic, ixpA+nw, iypA+nw, izpA+nw, itpA+nw]' * B[jc, kc, ixpB+nw, iypB+nw, izpB+nw, itpB+nw]'
             end
         end
     end
@@ -648,6 +1126,23 @@ function kernel_tr_4D_NC3(i, A, PN)
     s = zero(eltype(A))
     for ic = 1:3
         s += A[ic, ic, ix, iy, iz, it]
+    end
+    return s
+end
+
+function partial_trace(C::LatticeMatrix{4,T1,AT1,NC1,NC2}, μ::Int, position::Int=1) where {T1,AT1,NC1,NC2}
+    s = JACC.parallel_reduce(prod(C.PN), +, kernel_partial_trace_4D, C.A, NC1, C.PN, μ, position; init=zero(eltype(C.A)))
+    return s
+end
+export partial_trace
+
+function kernel_partial_trace_4D(i, A, NC, PN, μ, position)
+    NN = get_4Dindex(i, PN)
+    s = zero(eltype(A))
+    if NN[μ] == position
+        for ic = 1:NC
+            s += A[ic, ic, NN...]
+        end
     end
     return s
 end
@@ -817,53 +1312,128 @@ function kernel_normalize_generic!(i, u, PN, NC)
     return nothing
 end
 
-function randomize_matrix!(C::LatticeMatrix{4,T,AT,NC,NC}) where {T,AT,NC}
-    JACC.parallel_for(prod(C.PN), kernel_randomize_4D!, C.A, C.PN, NC)
+function randomize_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
+    JACC.parallel_for(prod(C.PN), kernel_randomize_4D!, C.A, C.PN, NC1, NC2)
     set_halo!(C)
 end
 export randomize_matrix!
 
-function kernel_randomize_4D!(i, u, PN, NC)
+function kernel_randomize_4D!(i, u, PN, NC1, NC2)
     ix, iy, iz, it = get_4Dindex(i, PN)
 
-    for ic = 1:NC
-        for jc = 1:NC
+    for jc = 1:NC2
+        for ic = 1:NC1
             u[ic, jc, ix, iy, iz, it] = rand() - 0.5 + im * (rand() - 0.5)
         end
     end
 
 end
 
-function clear_matrix!(C::LatticeMatrix{4,T,AT,NC,NC}) where {T,AT,NC}
-    JACC.parallel_for(prod(C.PN), kernel_clear_4D!, C.A, C.PN, NC)
+function clear_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
+    JACC.parallel_for(prod(C.PN), kernel_clear_4D!, C.A, C.PN, NC1, NC2)
     set_halo!(C)
 end
 export clear_matrix!
 
-function kernel_clear_4D!(i, u, PN, NC)
+function kernel_clear_4D!(i, u, PN, NC1, NC2)
     ix, iy, iz, it = get_4Dindex(i, PN)
 
-    for ic = 1:NC
-        for jc = 1:NC
+    for jc = 1:NC2
+        for ic = 1:NC1
             u[ic, jc, ix, iy, iz, it] = zero(eltype(u))
         end
     end
 
 end
 
-function makeidentity_matrix!(C::LatticeMatrix{4,T,AT,NC,NC}) where {T,AT,NC}
-    JACC.parallel_for(prod(C.PN), kernel_makeidentity_4D!, C.A, C.PN, NC)
+function makeidentity_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}) where {T,AT,NC1,NC2}
+    JACC.parallel_for(prod(C.PN), kernel_makeidentity_4D!, C.A, C.PN, NC1, NC2)
     set_halo!(C)
 end
 export makeidentity_matrix!
 
-function kernel_makeidentity_4D!(i, u, PN, NC)
+function kernel_makeidentity_4D!(i, u, PN, NC1, NC2)
     ix, iy, iz, it = get_4Dindex(i, PN)
 
-    for ic = 1:NC
-        for jc = 1:NC
+    for jc = 1:NC2
+        for ic = 1:NC1
             u[ic, jc, ix, iy, iz, it] = ifelse(ic == jc, one(eltype(u)), zero(eltype(u)))
         end
     end
 
+end
+
+#C = C+ α*A
+function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::LatticeMatrix{4,T1,AT1,NC1,NC2}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2}
+    JACC.parallel_for(prod(C.PN), kernel_add_4D!, C.A, A.A, C.PN, NC1, NC2, α)
+    set_halo!(C)
+end
+export add_matrix!
+
+function kernel_add_4D!(i, u, v, PN, NC1, NC2, α)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            u[ic, jc, ix, iy, iz, it] += α * v[ic, jc, ix, iy, iz, it]
+        end
+    end
+end
+
+#C = C+ α*shiftA
+function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::Shifted_Lattice{LatticeMatrix{4,T1,AT1,NC1,NC2},shift}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2,shift}
+    JACC.parallel_for(prod(C.PN), kernel_add_4D_shift!, C.A, A.A, C.PN, NC1, NC2, α, shift)
+    set_halo!(C)
+end
+
+
+function kernel_add_4D_shift!(i, u, v, PN, NC1, NC2, α, shift)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            u[ic, jc, ix, iy, iz, it] += α * v[ic, jc, ixp, iyp, izp, itp]
+        end
+    end
+end
+
+#C = C+ α*Adag
+function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::Adjoint_Lattice{LatticeMatrix{4,T1,AT1,NC1,NC2}}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2}
+    JACC.parallel_for(prod(C.PN), kernel_add_4D_dag!, C.A, A.A, C.PN, NC1, NC2, α)
+    set_halo!(C)
+end
+
+function kernel_add_4D_dag!(i, u, v, PN, NC1, NC2, α)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            u[ic, jc, ix, iy, iz, it] += α * v[jc, ic, ix, iy, iz, it]'
+        end
+    end
+end
+
+#C = C+ α*shiftAdag
+function add_matrix!(C::LatticeMatrix{4,T,AT,NC1,NC2}, A::Adjoint_Lattice{Shifted_Lattice{LatticeMatrix{4,T1,AT1,NC1,NC2},shift}}, α::Number=1) where {T,T1,AT,AT1,NC1,NC2,shift}
+    JACC.parallel_for(prod(C.PN), kernel_add_4D_shiftdag!, C.A, A.A, C.PN, NC1, NC2, α, shift)
+    set_halo!(C)
+end
+
+
+function kernel_add_4D_shiftdag!(i, u, v, PN, NC1, NC2, α, shift)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+
+    for jc = 1:NC2
+        for ic = 1:NC1
+            u[ic, jc, ix, iy, iz, it] += α * v[jc, ic, ixp, iyp, izp, itp]'
+        end
+    end
 end
