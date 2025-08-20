@@ -73,6 +73,13 @@ function normalizetest(NC)
 
     normalize_matrix!(M2)
     display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it] * M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it]')
+
+    randomize_matrix!(M2)
+    display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+    normalize_matrix!(M2)
+    display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it] * M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it]')
+    makeidentity_matrix!(M2)
+    display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
 end
 
 

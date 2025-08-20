@@ -816,3 +816,54 @@ function kernel_normalize_generic!(i, u, PN, NC)
 
     return nothing
 end
+
+function randomize_matrix!(C::LatticeMatrix{4,T,AT,NC,NC}) where {T,AT,NC}
+    JACC.parallel_for(prod(C.PN), kernel_randomize_4D!, C.A, C.PN, NC)
+    set_halo!(C)
+end
+export randomize_matrix!
+
+function kernel_randomize_4D!(i, u, PN, NC)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+
+    for ic = 1:NC
+        for jc = 1:NC
+            u[ic, jc, ix, iy, iz, it] = rand() - 0.5 + im * (rand() - 0.5)
+        end
+    end
+
+end
+
+function clear_matrix!(C::LatticeMatrix{4,T,AT,NC,NC}) where {T,AT,NC}
+    JACC.parallel_for(prod(C.PN), kernel_clear_4D!, C.A, C.PN, NC)
+    set_halo!(C)
+end
+export clear_matrix!
+
+function kernel_clear_4D!(i, u, PN, NC)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+
+    for ic = 1:NC
+        for jc = 1:NC
+            u[ic, jc, ix, iy, iz, it] = zero(eltype(u))
+        end
+    end
+
+end
+
+function makeidentity_matrix!(C::LatticeMatrix{4,T,AT,NC,NC}) where {T,AT,NC}
+    JACC.parallel_for(prod(C.PN), kernel_makeidentity_4D!, C.A, C.PN, NC)
+    set_halo!(C)
+end
+export makeidentity_matrix!
+
+function kernel_makeidentity_4D!(i, u, PN, NC)
+    ix, iy, iz, it = get_4Dindex(i, PN)
+
+    for ic = 1:NC
+        for jc = 1:NC
+            u[ic, jc, ix, iy, iz, it] = ifelse(ic == jc, one(eltype(u)), zero(eltype(u)))
+        end
+    end
+
+end
