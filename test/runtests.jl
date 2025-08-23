@@ -19,6 +19,7 @@ function normalizetest()
     for NC = 2:4
         @testset "NC = $NC" begin
             normalizetest(NC)
+            multest(NC)
         end
     end
 end
@@ -56,7 +57,7 @@ function normalizetest(NC)
     shift = (0, 0, 0, -2)
     M4 = Shifted_Lattice(M2, shift)
     substitute!(M5, M4)
-    ix, iy, iz, it = 1, 1, 1, 1
+    ix, iy, iz, it = 1, 8, 1, 1
     ixp = ix + shift[1]
     iyp = iy + shift[2]
     izp = iz + shift[3]
@@ -83,6 +84,79 @@ function normalizetest(NC)
 
     s = partial_trace(M2, 1)
     println(s)
+
+    A3 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+    M3 = LatticeMatrix(A3, dim, PEs; nw)
+    A4 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+    M4 = LatticeMatrix(A4, dim, PEs; nw)
+    mul!(M2, M3, M4)
+    A6 = gather_and_bcast_matrix(M2)
+    display(M3.A[:, :, nw+ix, nw+iy, nw+iz, nw+it] * M4.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+    display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+    display(A6[:, :, ix, iy, iz, it])
+
+end
+
+function multest(NC)
+    dim = 4
+    NX = 8
+    NY = 8
+    NZ = 8
+    NT = 8
+    gsize = (NX, NY, NZ, NT)
+    #gsize = (NX, NY)
+    nw = 1
+
+
+    nprocs = MPI.Comm_size(MPI.COMM_WORLD)
+    if length(ARGS) == 0
+        n1 = nprocs ÷ 2
+        if n1 == 0
+            n1 = 1
+        end
+        PEs = (n1, nprocs ÷ n1, 1, 1)
+    else
+        PEs = Tuple(parse.(Int64, ARGS))
+    end
+    M1 = LatticeMatrix(NC, NC, dim, gsize, PEs; nw)
+    comm = M1.cart
+
+    A = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+    M2 = LatticeMatrix(A, dim, PEs; nw)
+
+    M5 = similar(M2)
+
+    #shift = (3, 1, -1, -2)
+    shift = (0, 0, 0, -2)
+    M4 = Shifted_Lattice(M2, shift)
+    substitute!(M5, M4)
+    ix, iy, iz, it = 1, 8, 1, 1
+    ixp = ix + shift[1]
+    iyp = iy + shift[2]
+    izp = iz + shift[3]
+    itp = it + shift[4]
+    ixp = ifelse(ixp < 1, ixp + NX, ixp)
+    iyp = ifelse(iyp < 1, iyp + NY, iyp)
+    izp = ifelse(izp < 1, izp + NZ, izp)
+    itp = ifelse(itp < 1, itp + NT, itp)
+    ixp = ifelse(ixp > NX, ixp - NX, ixp)
+    iyp = ifelse(iyp > NY, iyp - NY, iyp)
+    izp = ifelse(izp > NZ, izp - NZ, izp)
+    itp = ifelse(itp > NT, itp - NT, itp)
+
+    A3 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+    M3 = LatticeMatrix(A3, dim, PEs; nw)
+    A4 = rand(ComplexF64, NC, NC, NX, NY, NZ, NT)
+    M4 = LatticeMatrix(A4, dim, PEs; nw)
+    mul!(M2, M3, M4)
+    A6 = gather_and_bcast_matrix(M2)
+    #display(M3.A[:, :, nw+ix, nw+iy, nw+iz, nw+it] * M4.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+    #display(M2.A[:, :, nw+ix, nw+iy, nw+iz, nw+it])
+    if MPI.Comm_rank(MPI.COMM_WORLD) == 0
+        display(A6[:, :, ix, iy, iz, it])
+    end
+    MPI.Barrier(MPI.COMM_WORLD)
+
 end
 
 

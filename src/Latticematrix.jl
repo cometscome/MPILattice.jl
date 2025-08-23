@@ -16,7 +16,7 @@ using MPI, StaticArrays, JACC
 # ---------------------------------------------------------------------------
 # container  (faces / derived datatypes are GONE)
 # ---------------------------------------------------------------------------
-struct LatticeMatrix{D,T,AT,NC1,NC2} <: Lattice{D,T,AT}
+struct LatticeMatrix{D,T,AT,NC1,NC2,nw} <: Lattice{D,T,AT}
     nw::Int                          # ghost width
     phases::SVector{D,T}                 # phases
     NC1::Int
@@ -33,6 +33,7 @@ struct LatticeMatrix{D,T,AT,NC1,NC2} <: Lattice{D,T,AT}
     myrank::Int
     PN::NTuple{D,Int}
     comm::MPI.Comm
+    #stride::NTuple{D,Int}
 end
 
 
@@ -57,6 +58,7 @@ function LatticeMatrix(NC1, NC2, dim, gsize, PEs; nw=1, elementtype=ComplexF64, 
     locS = ntuple(i -> gsize[i] ÷ dims[i] + 2nw, D)
     loc = (NC1, NC2, locS...)
     A = JACC.zeros(T, loc...)
+    #stride = ntuple(i -> (i == 1 ? 1 : prod(locS[1:i-1])), D)
 
     # contiguous buffers for each face
     buf = Vector{typeof(A)}(undef, 4D)
@@ -72,7 +74,7 @@ function LatticeMatrix(NC1, NC2, dim, gsize, PEs; nw=1, elementtype=ComplexF64, 
     PN = ntuple(i -> gsize[i] ÷ dims[i], D)
     #println("LatticeMatrix: $dims, $gsize, $PN, $nw")
 
-    return LatticeMatrix{D,T,typeof(A),NC1,NC2}(nw, phases, NC1, NC2, gsize,
+    return LatticeMatrix{D,T,typeof(A),NC1,NC2,nw}(nw, phases, NC1, NC2, gsize,
         cart, Tuple(coords), dims, nbr,
         A, buf, MPI.Comm_rank(cart), PN, comm0)
 end
@@ -80,7 +82,7 @@ end
 function LatticeMatrix(A, dim, PEs; nw=1, phases=ones(dim), comm0=MPI.COMM_WORLD)
 
     NC1, NC2, NN... = size(A)
-    println(NN)
+    #println(NN)
     elementtype = eltype(A)
 
     @assert dim == length(NN) "Dimension mismatch: expected $dim, got $(length(NN))"
@@ -354,3 +356,138 @@ compute_interior!(ls::LatticeMatrix) = nothing
 compute_boundary!(ls::LatticeMatrix) = nothing
 
 export LatticeMatrix
+
+# ---------------------------------------------------------------------------
+# gather_matrix: collect local (halo-stripped) blocks to rank=0
+# Reconstruct a global array of shape (NC1, NC2, gsize...)
+# Communication is done on host memory for portability (CPU/GPU back-ends).
+# ---------------------------------------------------------------------------
+function gather_matrix(ls::LatticeMatrix{D,T,AT,NC1,NC2};
+    root::Int=0) where {D,T,AT,NC1,NC2}
+    comm = ls.cart
+    me = ls.myrank
+    nprocs = MPI.Comm_size(comm)
+
+    # 1) Build view of the interior block (without halos)
+    #    Spatial dims are shifted by +2 because array layout = (NC1, NC2, X, Y, Z, ...)
+    interior_idx = ntuple(i -> (i <= 2 ? Colon() : (ls.nw+1):(ls.nw+ls.PN[i-2])), D + 2)
+    @views local_view = ls.A[interior_idx...]   # a view on device/host
+    local_block_cpu = Array(local_view)        # ensure host memory for MPI
+
+    # Flatten to 1D send buffer for simple point-to-point
+    sendbuf = reshape(local_block_cpu, :)
+    count = length(sendbuf)
+
+    # Helper: place a received block into the correct global offsets
+    # coords are 0-based along each cart dimension
+    function _place_block!(G, block, coords::NTuple{D,Int})
+        # Compute global spatial ranges for this coords
+        ranges = ntuple(d -> begin
+                start = coords[d] * ls.PN[d] + 1
+                stop = start + ls.PN[d] - 1
+                start:stop
+            end, D)
+        # Build indexing tuple = (Colon, Colon, ranges...)
+        idx = (Colon(), Colon(), ranges...)
+        @views G[idx...] = block
+        return nothing
+    end
+
+    if me == root
+        # 2) Allocate the global array on root
+        gshape = (ls.NC1, ls.NC2, ls.gsize...)
+        G = Array{T}(undef, gshape)
+
+        # 2a) Place root's own block
+        _place_block!(G, reshape(sendbuf, size(local_block_cpu)), ls.coords)
+
+        # 2b) Receive all other ranks and place
+        #     For simplicity use a fixed tag per direction.
+        tag = 900
+        recvbuf = similar(sendbuf)  # reuse buffer
+        for r in 0:nprocs-1
+            r == root && continue
+            MPI.Recv!(recvbuf, r, tag, comm)
+            coords_r = Tuple(MPI.Cart_coords(comm, r))  # 0-based coords
+            blk = reshape(recvbuf, size(local_block_cpu))
+            _place_block!(G, blk, coords_r)
+        end
+        return G
+    else
+        # Non-root: send and return nothing
+        tag = 900
+        MPI.Send(sendbuf, root, tag, comm)
+        return nothing
+    end
+end
+
+export gather_matrix
+
+# ---------------------------------------------------------------------------
+# gather_and_bcast_matrix:
+#   Collect halo-stripped blocks to root, reconstruct global matrix,
+#   then broadcast it so all ranks receive the same array.
+#   Returns Array{T}(NC1, NC2, gsize...)
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# gather_and_bcast_matrix:
+#   Collect local halo-free blocks to root, reconstruct global matrix on root,
+#   then broadcast the global matrix so that ALL ranks return the same Array.
+# ---------------------------------------------------------------------------
+function gather_and_bcast_matrix(ls::LatticeMatrix{D,T,AT,NC1,NC2};
+    root::Int=0) where {D,T,AT,NC1,NC2}
+    comm = ls.cart
+    me = ls.myrank
+    nprocs = MPI.Comm_size(comm)
+
+    # --- 1) local interior (no halo) on HOST ---
+    interior_idx = ntuple(i -> (i <= 2 ? Colon() : (ls.nw+1):(ls.nw+ls.PN[i-2])), D + 2)
+    @views local_view = ls.A[interior_idx...]
+    local_block_cpu = Array(local_view)              # host buffer
+    sendbuf = reshape(local_block_cpu, :)
+
+    # helper to place a block at correct global offsets
+    function _place_block!(G, block, coords::NTuple{D,Int})
+        ranges = ntuple(d -> begin
+                s = coords[d] * ls.PN[d] + 1
+                e = s + ls.PN[d] - 1
+                s:e
+            end, D)
+        idx = (Colon(), Colon(), ranges...)
+        @views G[idx...] = block
+        return nothing
+    end
+
+    G = nothing
+    if me == root
+        # --- 2) reconstruct on root ---
+        gshape = (ls.NC1, ls.NC2, ls.gsize...)
+        G = Array{T}(undef, gshape)
+
+        # root’s own block
+        _place_block!(G, reshape(sendbuf, size(local_block_cpu)), ls.coords)
+
+        # receive others
+        recvbuf = similar(sendbuf)
+        for r in 0:nprocs-1
+            r == root && continue
+            MPI.Recv!(recvbuf, r, 900, comm)
+            coords_r = Tuple(MPI.Cart_coords(comm, r))
+            blk = reshape(recvbuf, size(local_block_cpu))
+            _place_block!(G, blk, coords_r)
+        end
+    else
+        # non-root: send local block
+        MPI.Send(sendbuf, root, 900, comm)
+    end
+
+    # --- 3) broadcast ONLY the data (shape is deterministic) ---
+    gshape = (ls.NC1, ls.NC2, ls.gsize...)   # same on all ranks
+    if me != root
+        G = Array{T}(undef, gshape)          # allocate receive buffer
+    end
+    MPI.Bcast!(G, root, comm)                # broadcast the global array
+
+    return G
+end
+export gather_and_bcast_matrix
